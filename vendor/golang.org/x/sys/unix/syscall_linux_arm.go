@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// +build arm,linux
+
 package unix
 
 import (
@@ -9,20 +11,35 @@ import (
 	"unsafe"
 )
 
-func Getpagesize() int { return 4096 }
+func setTimespec(sec, nsec int64) Timespec {
+	return Timespec{Sec: int32(sec), Nsec: int32(nsec)}
+}
 
-func TimespecToNsec(ts Timespec) int64 { return int64(ts.Sec)*1e9 + int64(ts.Nsec) }
+func setTimeval(sec, usec int64) Timeval {
+	return Timeval{Sec: int32(sec), Usec: int32(usec)}
+}
 
-func NsecToTimespec(nsec int64) (ts Timespec) {
-	ts.Sec = int32(nsec / 1e9)
-	ts.Nsec = int32(nsec % 1e9)
+func Pipe(p []int) (err error) {
+	if len(p) != 2 {
+		return EINVAL
+	}
+	var pp [2]_C_int
+	err = pipe2(&pp, 0)
+	p[0] = int(pp[0])
+	p[1] = int(pp[1])
 	return
 }
 
-func NsecToTimeval(nsec int64) (tv Timeval) {
-	nsec += 999 // round up to microsecond
-	tv.Sec = int32(nsec / 1e9)
-	tv.Usec = int32(nsec % 1e9 / 1e3)
+//sysnb pipe2(p *[2]_C_int, flags int) (err error)
+
+func Pipe2(p []int, flags int) (err error) {
+	if len(p) != 2 {
+		return EINVAL
+	}
+	var pp [2]_C_int
+	err = pipe2(&pp, flags)
+	p[0] = int(pp[0])
+	p[1] = int(pp[1])
 	return
 }
 
@@ -57,13 +74,15 @@ func Seek(fd int, offset int64, whence int) (newoffset int64, err error) {
 
 // 64-bit file system and 32-bit uid calls
 // (16-bit uid calls are not always supported in newer kernels)
-//sys	Chown(path string, uid int, gid int) (err error) = SYS_CHOWN32
+//sys	Dup2(oldfd int, newfd int) (err error)
 //sys	Fchown(fd int, uid int, gid int) (err error) = SYS_FCHOWN32
 //sys	Fstat(fd int, stat *Stat_t) (err error) = SYS_FSTAT64
+//sys	Fstatat(dirfd int, path string, stat *Stat_t, flags int) (err error) = SYS_FSTATAT64
 //sysnb	Getegid() (egid int) = SYS_GETEGID32
 //sysnb	Geteuid() (euid int) = SYS_GETEUID32
 //sysnb	Getgid() (gid int) = SYS_GETGID32
 //sysnb	Getuid() (uid int) = SYS_GETUID32
+//sysnb	InotifyInit() (fd int, err error)
 //sys	Lchown(path string, uid int, gid int) (err error) = SYS_LCHOWN32
 //sys	Listen(s int, n int) (err error)
 //sys	Lstat(path string, stat *Stat_t) (err error) = SYS_LSTAT64
@@ -81,7 +100,28 @@ func Seek(fd int, offset int64, whence int) (newoffset int64, err error) {
 
 // Vsyscalls on amd64.
 //sysnb	Gettimeofday(tv *Timeval) (err error)
-//sysnb	Time(t *Time_t) (tt Time_t, err error)
+//sys	EpollWait(epfd int, events []EpollEvent, msec int) (n int, err error)
+//sys	Pause() (err error)
+
+func Time(t *Time_t) (Time_t, error) {
+	var tv Timeval
+	err := Gettimeofday(&tv)
+	if err != nil {
+		return 0, err
+	}
+	if t != nil {
+		*t = Time_t(tv.Sec)
+	}
+	return Time_t(tv.Sec), nil
+}
+
+func Utime(path string, buf *Utimbuf) error {
+	tv := []Timeval{
+		{Sec: buf.Actime},
+		{Sec: buf.Modtime},
+	}
+	return Utimes(path, tv)
+}
 
 //sys   Pread(fd int, p []byte, offset int64) (n int, err error) = SYS_PREAD64
 //sys   Pwrite(fd int, p []byte, offset int64) (n int, err error) = SYS_PWRITE64
@@ -131,7 +171,7 @@ type rlimit32 struct {
 	Max uint32
 }
 
-//sysnb getrlimit(resource int, rlim *rlimit32) (err error) = SYS_GETRLIMIT
+//sysnb getrlimit(resource int, rlim *rlimit32) (err error) = SYS_UGETRLIMIT
 
 const rlimInf32 = ^uint32(0)
 const rlimInf64 = ^uint64(0)
@@ -203,4 +243,13 @@ func (msghdr *Msghdr) SetControllen(length int) {
 
 func (cmsg *Cmsghdr) SetLen(length int) {
 	cmsg.Len = uint32(length)
+}
+
+//sys	poll(fds *PollFd, nfds int, timeout int) (n int, err error)
+
+func Poll(fds []PollFd, timeout int) (n int, err error) {
+	if len(fds) == 0 {
+		return poll(nil, 0, timeout)
+	}
+	return poll(&fds[0], len(fds), timeout)
 }

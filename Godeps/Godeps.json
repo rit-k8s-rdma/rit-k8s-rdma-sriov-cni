@@ -194,7 +194,7 @@
 		},
 		{
 			"ImportPath": "golang.org/x/sys/unix",
-			"Rev": "e11762ca30adc5b39fdbfd8c4250dabeb8e456d3"
+			"Rev": "3b87a42e500a6dc65dae1a55d0b641295971163e"
 		}
 	]
 }
