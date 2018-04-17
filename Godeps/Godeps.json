@@ -197,6 +197,10 @@
 			"Rev": "36e9d2ebbde5e3f13ab2e25625fd453271d6522e"
 		},
 		{
+			"ImportPath": "github.com/Mellanox/sriovnet",
+			"Rev": "5a536a1c501ea3f8e6d1854284e78c0175c93ba7"
+		},
+		{
 			"ImportPath": "golang.org/x/sys/unix",
 			"Rev": "3b87a42e500a6dc65dae1a55d0b641295971163e"
 		}
