@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
@@ -304,6 +305,24 @@ func setSharedVfVlan(ifName string, vfIdx int, vlan int) error {
 	return nil
 }
 
+func configSriov(master string) error {
+	err := sriovnet.EnableSriov(master)
+	if err != nil {
+		return err
+	}
+
+	handle, err2 := sriovnet.GetPfNetdevHandle(master)
+	if err2 != nil {
+		return err2
+	}
+	// configure privilege VFs
+	err2 = sriovnet.ConfigVfs(handle, true)
+	if err2 != nil {
+		return err2
+	}
+	return nil
+}
+
 func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS) error {
 
 	var vfIdx int
@@ -322,7 +341,10 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	}
 
 	if vfTotal <= 0 {
-		return fmt.Errorf("no virtual function in the device %q: %v", ifName)
+		err = configSriov(ifName)
+		if err != nil {
+			return fmt.Errorf("no virtual function in the device %q: %v", ifName)
+		}
 	}
 
 	for vf := 0; vf <= (vfTotal - 1); vf++ {
