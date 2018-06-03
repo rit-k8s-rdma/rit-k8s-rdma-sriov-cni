@@ -1,21 +1,11 @@
-#!/usr/bin/env bash
-set -e
+#!/bin/bash
 
-ORG_PATH="github.com/hustcat"
-REPO_PATH="${ORG_PATH}/sriov-cni"
+export GOPATH=${PWD}
+export CGO_ENABLED=0
+export GOOS=linux
 
-if [ ! -h gopath/src/${REPO_PATH} ]; then
-	mkdir -p gopath/src/${ORG_PATH}
-	ln -s ../../../.. gopath/src/${REPO_PATH} || exit 255
-fi
+go build -a -ldflags "-X main.GitCommitId=$GIT_COMMIT -extldflags "-static"" -o bin/`uname -m`/sriov sriov
+file bin/`uname -m`/sriov
 
-export GO15VENDOREXPERIMENT=1
-export GOBIN=${PWD}/bin
-export GOPATH=${PWD}/gopath
-
-echo "Building plugins"
-go install "$@" ${REPO_PATH}/sriov
-go install "$@" ${REPO_PATH}/fixipam
-mkdir -p bin/`uname -m`
-cp bin/sriov bin/`uname -m`/
-cp bin/fixipam bin/`uname -m`/
+go build -a -ldflags "-X main.GitCommitId=$GIT_COMMIT -extldflags "-static"" -o bin/`uname -m`/fixipam fixipam
+file bin/`uname -m`/fixipam
