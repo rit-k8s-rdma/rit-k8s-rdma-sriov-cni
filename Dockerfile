@@ -12,3 +12,8 @@ RUN go install -ldflags="-s -w -X main.GitCommitId=$GIT_COMMIT -extldflags "-sta
 FROM debian:stretch-slim
 COPY --from=build /go/workspace/bin/sriov /bin/sriov
 COPY --from=build /go/workspace/bin/fixipam /bin/fixipam
+
+RUN mkdir /installer
+COPY k8s-installer/installer.sh /installer/
+COPY k8s-installer/10-sriov-cni.conf /installer/
+COPY k8s-installer/installer_sleep.sh /installer/
