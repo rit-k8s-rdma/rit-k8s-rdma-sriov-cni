@@ -9,7 +9,7 @@ This is installer for Kubernetes SRIOV CNI networking plugin.
 2. Apply SRIOV cni configuration before deploying any Pods
 
 ```
-kubectl apply -f https://cdn.rawgit.com/Mellanox/sriov-cni/37883b34/k8s-installer/k8s-sriov-cni-installer.yaml
+kubectl apply -f https://cdn.rawgit.com/Mellanox/sriov-cni/e8fe1464/k8s-installer/k8s-sriov-cni-installer.yaml
 ```
 This installs necessary binaries and sriov configuration file.
 
