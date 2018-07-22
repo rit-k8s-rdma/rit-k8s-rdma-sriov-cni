@@ -3,6 +3,7 @@ FROM golang:1.10.1 as build
 WORKDIR /go/workspace
 COPY . .
 
+ARG GIT_COMMIT
 ENV GOPATH=/go/workspace
 ENV CGO_ENABLED=0
 ENV GOOS=linux
