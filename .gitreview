@@ -1,0 +1,5 @@
+[gerrit]
+host=l-gerrit.mtl.labs.mlnx
+port=29418
+project=sriov-cni
+defaultbranch=master
