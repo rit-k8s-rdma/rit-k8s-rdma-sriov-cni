@@ -628,8 +628,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
+	old_ifname := os.Getenv("CNI_IFNAME")
+	defer os.Setenv("CNI_IFNAME", old_ifname)
 	if n.IF0NAME != "" {
 		args.IfName = n.IF0NAME
+		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
 	if err = setupVF(n, n.IF0, args.IfName, args.ContainerID, netns); err != nil {
@@ -690,8 +693,11 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
+	old_ifname := os.Getenv("CNI_IFNAME")
+	defer os.Setenv("CNI_IFNAME", old_ifname)
 	if n.IF0NAME != "" {
 		args.IfName = n.IF0NAME
+		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
 	if err = releaseVF(n, args.IfName, args.ContainerID, netns); err != nil {
