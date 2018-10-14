@@ -635,10 +635,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
-	if err = setupVF(n, n.IF0, args.IfName, args.ContainerID, netns); err != nil {
-		return fmt.Errorf("failed to set up pod interface %q from the device %q: %v", args.IfName, n.IF0, err)
-	}
-
+	err = setupVF(n, n.IF0, args.IfName, args.ContainerID, netns)
+	defer func() {
+		if err != nil {
+			err = netns.Do(func(_ ns.NetNS) error {
+				_, err := netlink.LinkByName(args.IfName)
+				return err
+			})
+			if err == nil {
+				releaseVF(n, args.IfName, args.ContainerID, netns)
+			}
+		}
+	}()
 	// skip the IPAM allocation for the DPDK and L2 mode
 	var result *types.Result
 	if n.DPDKMode != false || n.L2Mode != false {
