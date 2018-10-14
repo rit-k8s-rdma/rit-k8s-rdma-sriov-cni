@@ -343,7 +343,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	if vfTotal <= 0 {
 		err = configSriov(ifName)
 		if err != nil {
-			return fmt.Errorf("no virtual function in the device %q: %v", ifName)
+			return fmt.Errorf("no virtual function in the device %q", ifName)
 		}
 	}
 
@@ -547,7 +547,7 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 
 		// move VF device to init netns
 		if err = netlink.LinkSetNsFd(vfDev, int(initns.Fd())); err != nil {
-			return fmt.Errorf("failed to move vf device to init netns: %v", ifName, err)
+			return fmt.Errorf("failed to move vf device %q to init netns: %v", ifName, err)
 		}
 
 		// reset vlan
@@ -578,7 +578,7 @@ func resetVfVlan(pfName, vfName string) error {
 	}
 
 	if vfTotal <= 0 {
-		return fmt.Errorf("no virtual function in the device %q: %v", pfName)
+		return fmt.Errorf("no virtual function in the device %q", pfName)
 	}
 
 	// Get VF id
