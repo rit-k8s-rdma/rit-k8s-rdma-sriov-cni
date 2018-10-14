@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"math/rand"
 
 	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/ipam"
@@ -422,12 +423,20 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 		sort.Sort(LinksByIndex(infos))
 	}
 
+	var vfName string
 	for i := 1; i <= len(infos); i++ {
 		vfDev, err := netlink.LinkByName(infos[i-1].Name())
 		if err != nil {
 			return fmt.Errorf("failed to lookup vf device %q: %v", infos[i-1].Name(), err)
 		}
-
+		// change name if it is eth0
+		if infos[i-1].Name() == "eth0" {
+			netlink.LinkSetDown(vfDev)
+			vfName = fmt.Sprintf("sriov%v", rand.Intn(9999))
+			renameLink(infos[i-1].Name(), vfName)
+		} else {
+			vfName = infos[i-1].Name()
+		}
 		if err = netlink.LinkSetUp(vfDev); err != nil {
 			return fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
 		}
@@ -446,7 +455,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				ifName = podifName + fmt.Sprintf("d%d", i-1)
 			}
 
-			err := renameLink(infos[i-1].Name(), ifName)
+			err := renameLink(vfName, ifName)
 			if err != nil {
 				return fmt.Errorf("failed to rename %d vf of the device %q to %q: %v", vfIdx, infos[i-1].Name(), ifName, err)
 			}
