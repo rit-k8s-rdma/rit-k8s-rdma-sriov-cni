@@ -1,20 +1,25 @@
-FROM golang:1.10.1 as build
+FROM centos:centos7
 
-WORKDIR /go/workspace
-COPY . .
 
-ARG GIT_COMMIT
-ENV GOPATH=/go/workspace
-ENV CGO_ENABLED=0
-ENV GOOS=linux
-RUN go install -ldflags="-s -w -X main.GitCommitId=$GIT_COMMIT -extldflags "-static"" -v sriov
-RUN go install -ldflags="-s -w -X main.GitCommitId=$GIT_COMMIT -extldflags "-static"" -v fixipam
+# Add everything
+ADD . /usr/src/sriov-cni-tmp
 
-FROM debian:stretch-slim
-COPY --from=build /go/workspace/bin/sriov /bin/sriov
-COPY --from=build /go/workspace/bin/fixipam /bin/fixipam
+ENV INSTALL_PKGS "git golang"
+RUN yum install -y $INSTALL_PKGS && \
+    rpm -V $INSTALL_PKGS && \
+    cd /usr/src/sriov-cni-tmp && \
+    ./build.sh && \
+    mkdir -p /usr/src/sriov-cni/bin && \
+    cp /usr/src/sriov-cni-tmp/bin/sriov /usr/src/sriov-cni/bin/sriov && \
+    yum autoremove -y $INSTALL_PKGS && \
+    yum clean all && \
+    rm -rf /usr/src/sriov-cni-tmp && \
+    rm -rf /tmp/*
 
-RUN mkdir /installer
-COPY k8s-installer/installer.sh /installer/
-COPY k8s-installer/10-sriov-cni.conf /installer/
-COPY k8s-installer/installer_sleep.sh /installer/
+WORKDIR /
+
+LABEL io.k8s.display-name="SR-IOV CNI"
+
+ADD ./images/entrypoint.sh /
+
+ENTRYPOINT ["/entrypoint.sh"]
