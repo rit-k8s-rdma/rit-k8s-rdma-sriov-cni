@@ -42,8 +42,9 @@ options ixgbe max_vfs=8,8
 ### Main parameters
 * `name` (string, required): the name of the network
 * `type` (string, required): "sriov"
-* `if0` (string, required): name of the PF
+* `if0` (string, optional): name of the PF, if not provided then `pfNetdevices` is required
 * `if0name` (string, optional): interface name in the Container
+* `pfNetdevices` (list, optional) PFs list, if not provided then `if0` is required
 * `l2enable` (boolean, optional): if `true` then add VF as L2 mode only, IPAM will not be executed
 * `vlan` (int, optional): VLAN ID to assign for the VF
 * `ipam` (dictionary, optional): IPAM configuration to be used for this network.
@@ -120,6 +121,25 @@ lo        Link encap:Local Loopback
 EOF
 ```
 
+### Configuration with Multiple PFs:
+
+```
+# cat > /etc/cni/net.d/10-mynet.conf <<EOF
+{
+    "name": "mynet",
+    "type": "sriov",
+    "pfNetdevices": ["enp2s0f0", "enp2s0f1"],
+    "ipam": {
+        "type": "host-local",
+        "subnet": "10.55.206.0/26",
+        "routes": [
+            { "dst": "0.0.0.0/0" }
+        ],
+        "gateway": "10.55.206.1"
+    }
+}
+EOF
+```
 
 [More info](https://github.com/containernetworking/cni/pull/259).
 
