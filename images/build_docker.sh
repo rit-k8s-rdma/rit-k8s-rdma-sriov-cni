@@ -1,6 +1,8 @@
 #!/bin/bash
 
-VALID_CMDS=(image local manifest)
+set -e
+
+VALID_CMDS=(image manifest local)
 VALID_DOCKER_ARCH=(amd64 ppc64le)
 
 declare -A MACHINEARCH2DOCKER_ARCH
@@ -13,18 +15,20 @@ DOCKER2MACHINEARCH[ppc64le]=ppc64le
 
 GIT_VER=$(git rev-list -1 HEAD)
 
+MACHINE_ARCH=$(uname -m)
 IMAGE_NAME=k8s-sriov-cni
 REPO_NAME=rdma
+QEMU_DOCKER_IMAGE=multiarch/qemu-user-static:register
+DEBIAN_DOCKER_IMAGE=debian:stretch-slim
 input_cmd=""
-MACHINE_ARCH=`uname -m`
 
 function usage_help()
 {
-	echo "./build_docker [COMMAND]"
+	echo "./build [COMMAND]"
 	echo "Examples:"
-	echo "./build_docker image           To build the image"
-	echo "./build_docker local           To build the binary localy"
-	echo "./build_docker manifest        Build image for all supported architectures and modify manifest"
+	echo "./build image           To build the image"
+	echo "./build local           To build the binary without container image"
+	echo "./build manifest        Build image for all supported architectures and modify manifest"
 }
 
 function check_for_help()
@@ -80,14 +84,14 @@ function build_image()
 		return
 	fi
 	echo "Building image $IMAGE_NAME for ARCH $ARCH:"
-	if [[ $(docker images -q 'centos:centos7') != "" ]]; then
-		docker image rm centos:centos7
+	if [[ $(docker images -q "${DEBIAN_DOCKER_IMAGE}") != "" ]]; then
+		docker image rm "$DEBIAN_DOCKER_IMAGE"
 	fi
-	rm -rf qemu
+	../build.sh
 	if [ ${ARCH} != ${MACHINEARCH2DOCKER_ARCH[$MACHINE_ARCH]} ] ; then
 		# different arch
-		if [[ $(docker images -q 'multiarch/qemu-user-static:register') == "" ]]; then
-			docker run --rm --privileged multiarch/qemu-user-static:register
+		if [[ $(docker images -q "${QEMU_DOCKER_IMAGE}") == "" ]]; then
+			docker run --rm --privileged "${QEMU_DOCKER_IMAGE}"
 		fi
 		if [ ! -d ~/cli ]; then
 			git clone  https://github.com/docker/cli.git ~/cli
@@ -100,7 +104,7 @@ function build_image()
 		fi
 		cp ../Dockerfile ../Dockerfile.${ARCH}
 		interpreter=$(sed -n '2,2p' /proc/sys/fs/binfmt_misc/qemu-${ARCH} | cut -b 13-)
-		sed -i '/^FROM centos:centos7/a COPY qemu/qemu-'${DOCKER2MACHINEARCH[$ARCH]}'-static '${interpreter} ../Dockerfile.${ARCH}
+		sed -i '/^FROM debian:stretch-slim/a COPY ./qemu/qemu-'${DOCKER2MACHINEARCH[$ARCH]}'-static '${interpreter} ../Dockerfile.${ARCH}
 		if [ ! -d ~/qemu ]; then
 			mkdir -p ~/qemu
 		fi
@@ -111,15 +115,17 @@ function build_image()
 			tar -xvf ${MACHINE_ARCH}_qemu-${ARCH}-static.tar.gz
 			cd $current_path
 		fi
-		mkdir -p qemu
-		cp ~/qemu/qemu-${ARCH}-static ./qemu
-		cp "qemu/qemu-${ARCH}-static" $interpreter
-		~/cli/build/docker-linux-${ARCH} build -f ../Dockerfile.${ARCH} --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ../
+		mkdir -p ../qemu
+		cp ~/qemu/qemu-${ARCH}-static ../qemu
+		cp "../qemu/qemu-${ARCH}-static" $interpreter
+		~/cli/build/docker-linux-${ARCH} build -f ../Dockerfile.${ARCH} --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ..
 		rm ../Dockerfile.${ARCH}
+		rm -rf ../qemu
 	else
 		# same arch
-		docker build -f ../Dockerfile --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ../
+		docker build -f ../Dockerfile --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ..
 	fi
+	echo "Finished building image successfully"
 }
 
 function execute_cmd()
@@ -130,7 +136,9 @@ function execute_cmd()
 	;;
 	"local")
 		../build.sh
+		echo "Finished building binary successfully"
 	;;
+
 	"manifest")
 		echo "Building image for ARCHs x86_64 and ppc64le"
 		for n in ${VALID_DOCKER_ARCH[@]}
@@ -148,7 +156,7 @@ function execute_cmd()
 check_for_help $1
 
 if [[ ! -z $1 ]]; then
-        validate_input_cmd $1
+	validate_input_cmd $1
 fi
 
 if [[ -z $VERSION && $1 != "local" ]]; then

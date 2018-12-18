@@ -34,7 +34,7 @@ for d in $PLUGINS; do
 			fi
 		else
 			echo "  $plugin"
-		        $GO build -ldflags "${LD_FLAGS}" -o "${PWD}/bin/${plugin}" "${@}" "${REPO_PATH}"/$d
+		        GOARCH=$ARCH $GO build -ldflags "${LD_FLAGS}" -o "${PWD}/bin/${plugin}" "${@}" "${REPO_PATH}"/$d
 		fi
 	fi
 done
