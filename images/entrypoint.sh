@@ -52,8 +52,7 @@ declare -a arr=($CNI_BIN_DIR $SRIOV_BIN_FILE)
 for i in "${arr[@]}"
 do
   if [ ! -e "$i" ]; then
-    echo "Location $i does not exist"
-    exit 1;
+    mkdir -p "$i"
   fi
 done
 

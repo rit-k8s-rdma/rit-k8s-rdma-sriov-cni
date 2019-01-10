@@ -18,7 +18,7 @@ GIT_VER=$(git rev-list -1 HEAD)
 MACHINE_ARCH=$(uname -m)
 IMAGE_NAME=k8s-sriov-cni
 REPO_NAME=rdma
-QEMU_DOCKER_IMAGE=multiarch/qemu-user-static:register
+EMU_DOCKER_IMAGE=multiarch/qemu-user-static:register
 DEBIAN_DOCKER_IMAGE=debian:stretch-slim
 input_cmd=""
 
@@ -67,6 +67,51 @@ function validate_input_cmd()
 	fi
 }
 
+function build_different_arch_image()
+{
+	# pull qemu-user-static image if not exist to create image for different arch
+	if [[ $(docker images -q 'multiarch/qemu-user-static:register') == "" ]]; then
+		docker run --rm --privileged multiarch/qemu-user-static:register
+	fi
+	# fetch docker cli
+	if [ ! -d ~/cli ]; then
+		git clone  https://github.com/docker/cli.git ~/cli
+	fi
+	# build binary docker cli for the needed arch
+	if [ ! -f ~/cli/build/docker-linux-${ARCH} ]; then
+		current_path=$(pwd)
+		cd ~/cli
+		make -f docker.Makefile cross
+		cd $current_path
+	fi
+	# update Dockerfile to add the qemu file that allow running different arch bianry
+	cp ../Dockerfile ../Dockerfile.${ARCH}
+	interpreter=$(sed -n '2,2p' /proc/sys/fs/binfmt_misc/qemu-${ARCH} | cut -b 13-)
+	if [ -z $"interpreter" ]; then
+		echo "file /proc/sys/fs/binfmt_misc/qemu-${ARCH} not found"
+		echo "Please install package qemu-user-static to support running binaries from different architectures"
+		exit 1
+	fi
+	sed -i '/^FROM debian:stretch-slim/a COPY ./qemu/qemu-'${DOCKER2MACHINEARCH[$ARCH]}'-static '${interpreter} ../Dockerfile.${ARCH}
+	if [ ! -d ~/qemu ]; then
+		mkdir -p ~/qemu
+	fi
+	# copy the qemu file to /bin and the project directory
+	if [ ! -f ~/qemu/qemu-${ARCH}-static ]; then
+		current_path=$(pwd)
+		cd ~/qemu
+		wget -N https://github.com/multiarch/qemu-user-static/releases/download/v2.9.1-1/${MACHINE_ARCH}_qemu-${ARCH}-static.tar.gz
+		tar -xvf ${MACHINE_ARCH}_qemu-${ARCH}-static.tar.gz
+		cd $current_path
+	fi
+	mkdir -p ../qemu
+	cp ~/qemu/qemu-${ARCH}-static ../qemu
+	cp "../qemu/qemu-${ARCH}-static" "${interpreter}"
+	~/cli/build/docker-linux-${ARCH} build -f ../Dockerfile.${ARCH} --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ..
+	rm ../Dockerfile.${ARCH}
+	rm -rf ../qemu
+}
+
 function build_image()
 {
 	if [ -z $ARCH ]; then
@@ -84,47 +129,19 @@ function build_image()
 		return
 	fi
 	echo "Building image $IMAGE_NAME for ARCH $ARCH:"
-	if [[ $(docker images -q "${DEBIAN_DOCKER_IMAGE}") != "" ]]; then
-		docker image rm "$DEBIAN_DOCKER_IMAGE"
+	if [[ $(docker images -q 'debian:stretch-slim') != "" ]]; then
+		docker image rm debian:stretch-slim
 	fi
 	../build.sh
 	if [ ${ARCH} != ${MACHINEARCH2DOCKER_ARCH[$MACHINE_ARCH]} ] ; then
 		# different arch
-		if [[ $(docker images -q "${QEMU_DOCKER_IMAGE}") == "" ]]; then
-			docker run --rm --privileged "${QEMU_DOCKER_IMAGE}"
-		fi
-		if [ ! -d ~/cli ]; then
-			git clone  https://github.com/docker/cli.git ~/cli
-		fi
-		if [ ! -f ~/cli/build/docker-linux-${ARCH} ]; then
-			current_path=$(pwd)
-			cd ~/cli
-			make -f docker.Makefile cross
-			cd $current_path
-		fi
-		cp ../Dockerfile ../Dockerfile.${ARCH}
-		interpreter=$(sed -n '2,2p' /proc/sys/fs/binfmt_misc/qemu-${ARCH} | cut -b 13-)
-		sed -i '/^FROM debian:stretch-slim/a COPY ./qemu/qemu-'${DOCKER2MACHINEARCH[$ARCH]}'-static '${interpreter} ../Dockerfile.${ARCH}
-		if [ ! -d ~/qemu ]; then
-			mkdir -p ~/qemu
-		fi
-		if [ ! -f ~/qemu/qemu-${ARCH}-static ]; then
-			current_path=$(pwd)
-			cd ~/qemu
-			wget -N https://github.com/multiarch/qemu-user-static/releases/download/v2.9.1-1/${MACHINE_ARCH}_qemu-${ARCH}-static.tar.gz
-			tar -xvf ${MACHINE_ARCH}_qemu-${ARCH}-static.tar.gz
-			cd $current_path
-		fi
-		mkdir -p ../qemu
-		cp ~/qemu/qemu-${ARCH}-static ../qemu
-		cp "../qemu/qemu-${ARCH}-static" $interpreter
-		~/cli/build/docker-linux-${ARCH} build -f ../Dockerfile.${ARCH} --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ..
-		rm ../Dockerfile.${ARCH}
-		rm -rf ../qemu
+		build_different_arch_image
+		echo "Finished building binary successfully"
 	else
 		# same arch
 		docker build -f ../Dockerfile --pull --platform ${ARCH} -t ${REPO_NAME}/${IMAGE_NAME}-${ARCH}:${VERSION} ..
 	fi
+	rm -rf gopath
 	echo "Finished building image successfully"
 }
 
@@ -136,9 +153,7 @@ function execute_cmd()
 	;;
 	"local")
 		../build.sh
-		echo "Finished building binary successfully"
 	;;
-
 	"manifest")
 		echo "Building image for ARCHs x86_64 and ppc64le"
 		for n in ${VALID_DOCKER_ARCH[@]}
@@ -146,9 +161,9 @@ function execute_cmd()
 			ARCH=$n
 			build_image
 		done
-		docker manifest create rdma/${IMAGE_NAME}:${VERSION} rdma/${IMAGE_NAME}-amd64:${VERSION} rdma/${IMAGE_NAME}-ppc64le:${VERSION}
-		docker manifest annotate rdma/$IMAGE_NAME:${VERSION} rdma/$IMAGE_NAME-x86_64:${VERSION} --os linux --arch amd64
-		docker manifest annotate rdma/$IMAGE_NAME:${VERSION} rdma/$IMAGE_NAME-ppc64le:${VERSION} --os linux --arch ppc64le
+		docker manifest create ${REPO_NAME}/${IMAGE_NAME}:${VERSION} ${REPO_NAME}/${IMAGE_NAME}-amd64:${VERSION} ${REPO_NAME}/${IMAGE_NAME}-ppc64le:${VERSION}
+		docker manifest annotate ${REPO_NAME}/$IMAGE_NAME:${VERSION} ${REPO_NAME}/$IMAGE_NAME-x86_64:${VERSION} --os linux --arch amd64
+		docker manifest annotate ${REPO_NAME}/$IMAGE_NAME:${VERSION} ${REPO_NAME}/$IMAGE_NAME-ppc64le:${VERSION} --os linux --arch ppc64le
 	;;
 	esac
 }
