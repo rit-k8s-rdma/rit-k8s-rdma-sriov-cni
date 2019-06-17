@@ -493,7 +493,11 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 		}
 	}
 
-	if err = netlink.LinkSetVfTxRate(m, vfIdx, 5000); err != nil {
+	if logFile != nil {
+		logFile.Write([]byte("NETLINK: setting up transaction rate\n"))
+	}
+
+	if err = netlink.LinkSetVfTxRate(m, vfIdx, 75757); err != nil {
 		return fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
 	}
 
@@ -640,6 +644,14 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 		index := vfDev.Attrs().Index
 		devName := fmt.Sprintf("dev%d", index)
 
+		// if logFile != nil {
+		// 	logFile.Write([]byte("NETLINK: change back transaction rate\n"))
+		// }
+
+		// if err = netlink.LinkSetVfTxRate(vfDev, index, 0); err != nil {
+		// 	return fmt.Errorf("failed to setup vf %d device: %v", index, err)
+		// }
+
 		// shutdown VF device
 		if err = netlink.LinkSetDown(vfDev); err != nil {
 			return fmt.Errorf("failed to down vf device %q: %v", ifName, err)
@@ -783,6 +795,7 @@ func getContainer(namespace, containerID string) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
+	// return fmt.Errorf("Error failed to set on node.")
 	//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
 	//	defer logFile.Close()
 	if logFile != nil {
