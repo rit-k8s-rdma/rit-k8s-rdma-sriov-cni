@@ -22,7 +22,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/vishvananda/netlink"
 
-//	errors2 "k8s.io/apimachinery/pkg/api/errors"
+	//	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -30,6 +30,7 @@ import (
 
 const defaultCNIDir = "/var/lib/cni/sriov"
 const maxSharedVf = 2
+
 var logFile *os.File
 
 type dpdkConf struct {
@@ -54,9 +55,9 @@ type NetConf struct {
 	PfNetdevices []string `json:"pfNetdevices"`
 }
 
-type pfInfo struct{
+type pfInfo struct {
 	PFNdevName string
-	NumVfs int
+	NumVfs     int
 }
 
 type pfList []*pfInfo
@@ -90,7 +91,7 @@ func (l LinksByIndex) Less(i, j int) bool {
 }
 
 func init() {
-//	logFile.Write([]byte("ENTERING init\n"))
+	//	logFile.Write([]byte("ENTERING init\n"))
 	// this ensures that main runs only on main thread (thread group leader).
 	// since namespace ops (unshare, setns) are done for a single thread, we
 	// must ensure that the goroutine does not jump from OS thread to thread
@@ -98,7 +99,9 @@ func init() {
 }
 
 func checkIf0name(ifname string) bool {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING checkIf0name\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING checkIf0name\n"))
+	}
 	op := []string{"eth0", "eth1", "lo", ""}
 	for _, if0name := range op {
 		if strings.Compare(if0name, ifname) == 0 {
@@ -110,7 +113,9 @@ func checkIf0name(ifname string) bool {
 }
 
 func loadConf(bytes []byte) (*NetConf, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING loadConf\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING loadConf\n"))
+	}
 	n := &NetConf{}
 	if err := json.Unmarshal(bytes, n); err != nil {
 		return nil, fmt.Errorf("failed to load netconf: %v", err)
@@ -139,7 +144,9 @@ func loadConf(bytes []byte) (*NetConf, error) {
 }
 
 func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING saveScratchNetConf\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING saveScratchNetConf\n"))
+	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return fmt.Errorf("failed to create the sriov data directory(%q): %v", dataDir, err)
 	}
@@ -155,7 +162,9 @@ func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
 }
 
 func consumeScratchNetConf(containerID, dataDir string) ([]byte, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING consumeScratchNetConf\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING consumeScratchNetConf\n"))
+	}
 	path := filepath.Join(dataDir, containerID)
 	defer os.Remove(path)
 
@@ -168,7 +177,9 @@ func consumeScratchNetConf(containerID, dataDir string) ([]byte, error) {
 }
 
 func saveNetConf(cid, dataDir string, conf *NetConf) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING saveNetConf\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING saveNetConf\n"))
+	}
 	confBytes, err := json.Marshal(conf)
 	if err != nil {
 		return fmt.Errorf("error serializing delegate netconf: %v", err)
@@ -186,7 +197,9 @@ func saveNetConf(cid, dataDir string, conf *NetConf) error {
 }
 
 func (nc *NetConf) getNetConf(cid, podIfName, dataDir string, conf *NetConf) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getNetConf\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getNetConf\n"))
+	}
 	s := []string{cid, podIfName}
 	cRef := strings.Join(s, "-")
 
@@ -205,13 +218,15 @@ func (nc *NetConf) getNetConf(cid, podIfName, dataDir string, conf *NetConf) err
 // Devices is ordered by its number of VFs, device that has the
 // most number of vfs will be first in the list.
 func getOrderedPF(devices []string) ([]string, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getOrderedPF\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getOrderedPF\n"))
+	}
 	//check pf devices
 	var pfs pfList
-	for _, pfName := range(devices){
+	for _, pfName := range devices {
 		vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn*/net/*", pfName)
 		vfs, err := filepath.Glob(vfDir)
-		if err != nil{
+		if err != nil {
 			return nil, err
 		}
 		pfs = append(pfs, &pfInfo{pfName, len(vfs)})
@@ -220,14 +235,16 @@ func getOrderedPF(devices []string) ([]string, error) {
 	sort.Sort(pfs)
 
 	var result []string
-	for _, pf := range(pfs){
+	for _, pf := range pfs {
 		result = append(result, pf.PFNdevName)
 	}
 	return result, nil
 }
 
 func enabledpdkmode(conf *dpdkConf, ifname string, dpdkmode bool) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING enabledpdkmode\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING enabledpdkmode\n"))
+	}
 	stdout := &bytes.Buffer{}
 	var driver string
 	var device string
@@ -252,7 +269,9 @@ func enabledpdkmode(conf *dpdkConf, ifname string, dpdkmode bool) error {
 }
 
 func getpciaddress(ifName string, vf int) (string, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getpciaddress\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getpciaddress\n"))
+	}
 	var pciaddr string
 	vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn%d", ifName, vf)
 	dirInfo, err := os.Lstat(vfDir)
@@ -274,7 +293,9 @@ func getpciaddress(ifName string, vf int) (string, error) {
 }
 
 func getSharedPF(ifName string) (string, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getSharedPF\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getSharedPF\n"))
+	}
 	pfName := ""
 	pfDir := fmt.Sprintf("/sys/class/net/%s", ifName)
 	dirInfo, err := os.Lstat(pfDir)
@@ -301,7 +322,9 @@ func getSharedPF(ifName string) (string, error) {
 }
 
 func getsriovNumfs(ifName string) (int, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getsriovNumfs\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getsriovNumfs\n"))
+	}
 	var vfTotal int
 
 	sriovFile := fmt.Sprintf("/sys/class/net/%s/device/sriov_numvfs", ifName)
@@ -328,7 +351,9 @@ func getsriovNumfs(ifName string) (int, error) {
 }
 
 func setSharedVfVlan(ifName string, vfIdx int, vlan int) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING setSharedVfVlan\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING setSharedVfVlan\n"))
+	}
 	var err error
 	var sharedifName string
 
@@ -369,7 +394,9 @@ func setSharedVfVlan(ifName string, vfIdx int, vlan int) error {
 }
 
 func configSriov(master string) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING configSriov\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING configSriov\n"))
+	}
 	err := sriovnet.EnableSriov(master)
 	if err != nil {
 		return err
@@ -388,7 +415,9 @@ func configSriov(master string) error {
 }
 
 func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING setupVF\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING setupVF\n"))
+	}
 
 	var vfIdx int
 	var infos []os.FileInfo
@@ -463,6 +492,15 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			}
 		}
 	}
+
+	if logFile != nil {
+		logFile.Write([]byte("NETLINK: setting up transaction rate\n"))
+	}
+
+	if err = netlink.LinkSetVfTxRate(m, vfIdx, 75757); err != nil {
+		return fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
+	}
+
 	conf.DPDKConf.PCIaddr = pciAddr
 	conf.DPDKConf.Ifname = podifName
 	conf.DPDKConf.VFID = vfIdx
@@ -532,7 +570,9 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 }
 
 func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING releaseVF\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING releaseVF\n"))
+	}
 
 	nf := &NetConf{}
 	// get the net conf in cniDir
@@ -604,6 +644,14 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 		index := vfDev.Attrs().Index
 		devName := fmt.Sprintf("dev%d", index)
 
+		// if logFile != nil {
+		// 	logFile.Write([]byte("NETLINK: change back transaction rate\n"))
+		// }
+
+		// if err = netlink.LinkSetVfTxRate(vfDev, index, 0); err != nil {
+		// 	return fmt.Errorf("failed to setup vf %d device: %v", index, err)
+		// }
+
 		// shutdown VF device
 		if err = netlink.LinkSetDown(vfDev); err != nil {
 			return fmt.Errorf("failed to down vf device %q: %v", ifName, err)
@@ -640,7 +688,9 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 }
 
 func resetVfVlan(pfName, vfName string) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING resetVfVlan\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING resetVfVlan\n"))
+	}
 
 	// get the ifname sriov vf num
 	vfTotal, err := getsriovNumfs(pfName)
@@ -679,7 +729,9 @@ func resetVfVlan(pfName, vfName string) error {
 }
 
 func validateSriovEnabled(pfName string) error {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING validateSriovEnabled\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING validateSriovEnabled\n"))
+	}
 	vfTotal, err := getsriovNumfs(pfName)
 	if err != nil {
 		return err
@@ -695,7 +747,9 @@ func validateSriovEnabled(pfName string) error {
 }
 
 func getPFs(if0 string, devs []string) ([]string, error) {
-	if(logFile != nil) {logFile.Write([]byte("ENTERING getPFs\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getPFs\n"))
+	}
 	pfs := []string{}
 	if if0 != "" {
 		pfs = append(pfs, if0)
@@ -721,10 +775,29 @@ func getPFs(if0 string, devs []string) ([]string, error) {
 	return orderedPF, nil
 }
 
+func getContainer(namespace, containerID string) {
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING getContainer\n"))
+	}
+	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
+	if err != nil {
+		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+	pods, err := clientset.CoreV1().Pods(namespace).List(metav1.ListOptions{})
+	if err != nil {
+		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+	logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
+}
+
 func cmdAdd(args *skel.CmdArgs) error {
-//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
-//	defer logFile.Close()
-	if(logFile != nil) {logFile.Write([]byte("ENTERING cmdAdd\n"))}
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING cmdAdd\n"))
+	}
 	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
 //	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
 //	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
@@ -741,8 +814,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 	container_id_log.Write([]byte("aaaaa\n"))
 	container_id_log.Close()
 
-	if(logFile != nil) {logFile.Write(args.StdinData)}
-	if(logFile != nil) {logFile.Write([]byte("\n"))}
+	if logFile != nil {
+		logFile.Write(args.StdinData)
+	}
+	if logFile != nil {
+		logFile.Write([]byte("\n"))
+	}
 
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {
@@ -762,7 +839,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	for _, pf := range(pfs){
+	for _, pf := range pfs {
 		err = setupVF(n, pf, args.IfName, args.ContainerID, netns)
 		if err == nil {
 			break
@@ -814,9 +891,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
-//	defer logFile.Close()
-	if(logFile != nil) {logFile.Write([]byte("ENTERING cmdDel\n"))}
+	//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
+	//	defer logFile.Close()
+	if logFile != nil {
+		logFile.Write([]byte("ENTERING cmdDel\n"))
+	}
 	n, err := loadConf(args.StdinData)
 	if err != nil {
 		return err
@@ -873,7 +952,7 @@ func setUpLink(ifName string) error {
 }
 
 func main() {
-	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
+	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	logFile.Write([]byte("ENTERING main\n"))
 
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
