@@ -725,11 +725,21 @@ func cmdAdd(args *skel.CmdArgs) error {
 //	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
 //	defer logFile.Close()
 	if(logFile != nil) {logFile.Write([]byte("ENTERING cmdAdd\n"))}
+	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
+//	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
+//	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
+//	if(logFile != nil) {logFile.Write([]byte("\nNetork Namespace: "))}
+//	if(logFile != nil) {logFile.Write([]byte(args.Netns))}
+	if(logFile != nil) {logFile.Write([]byte("\n"))}
 
 	n, err := loadConf(args.StdinData)
 	if err != nil {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
+
+	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
+	container_id_log.Write([]byte("aaaaa\n"))
+	container_id_log.Close()
 
 	if(logFile != nil) {logFile.Write(args.StdinData)}
 	if(logFile != nil) {logFile.Write([]byte("\n"))}
@@ -877,6 +887,10 @@ func main() {
 	pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
 	if(err != nil) {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+	for n := 0; n < len(pods.Items); n++ {
+		logFile.Write([]byte(fmt.Sprintf("%+v", pods.Items[n].ObjectMeta)))
+		logFile.Write([]byte("\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
 
