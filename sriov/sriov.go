@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+//	"log"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -14,6 +15,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
+	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
 
 	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/ipam"
@@ -951,6 +955,32 @@ func setUpLink(ifName string) error {
 	return netlink.LinkSetUp(link)
 }
 
+func allocateVfsToPod(pfs []rdma_hardware_info.PF, pod_interfaces_required []knapsack_pod_placement.RdmaInterfaceRequest, interface_placements []int) {
+}
+
+/*
+func getPodRequirements() {
+	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
+	if(err != nil) {
+		log.Fatal("RDMA CNI: Error building Kubernetes configuration from file /etc/kubernetes/kubelet.conf")
+//		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if(err != nil) {
+		log.Fatal("RDMA CNI: Error building clientset from Kubernetes config file.")
+//		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+
+	pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
+	if(err != nil) {
+		log.Fatal("RDMA CNI: Error retrieving pod information from Kubernetes API server.")
+//		logFile.Write([]byte("An error occured when reading config file.\n"))
+	}
+	
+}
+*/
+
 func main() {
 	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	logFile.Write([]byte("ENTERING main\n"))
@@ -959,14 +989,17 @@ func main() {
 	if(err != nil) {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if(err != nil) {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
+
 	pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
 	if(err != nil) {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
+
 	for n := 0; n < len(pods.Items); n++ {
 		logFile.Write([]byte(fmt.Sprintf("%+v", pods.Items[n].ObjectMeta)))
 		logFile.Write([]byte("\n"))
