@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-//	"log"
+	"log"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -228,7 +228,7 @@ func getOrderedPF(devices []string) ([]string, error) {
 	//check pf devices
 	var pfs pfList
 	for _, pfName := range devices {
-		vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn*/net/*", pfName)
+		vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn*/net/*", pfName) /* */
 		vfs, err := filepath.Glob(vfDir)
 		if err != nil {
 			return nil, err
@@ -803,11 +803,38 @@ func cmdAdd(args *skel.CmdArgs) error {
 		logFile.Write([]byte("ENTERING cmdAdd\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
+
+	pod_name := ""
+	pod_ns := ""
+	for _, arg_mapping := range strings.Split((*args).Args, ";") {
+		key_value_pair := strings.Split(arg_mapping, "=")
+		if(len(key_value_pair) == 2) {
+			if(key_value_pair[0] == "K8S_POD_NAMESPACE") {
+				pod_ns = key_value_pair[1]
+			} else if (key_value_pair[0] == "K8S_POD_NAME") {
+				pod_name = key_value_pair[1]
+			}
+		}
+	}
 //	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
 //	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
 //	if(logFile != nil) {logFile.Write([]byte("\nNetork Namespace: "))}
 //	if(logFile != nil) {logFile.Write([]byte(args.Netns))}
 	if(logFile != nil) {logFile.Write([]byte("\n"))}
+
+	pod_required_interfaces := getPodRequirements(pod_name, pod_ns)
+	log.Println(pod_required_interfaces)
+	pfs_available, err := rdma_hardware_info.QueryNode("127.0.0.1", rdma_hardware_info.DefaultPort, 1500)
+	if(err != nil) {
+		log.Fatal("Could not determine what RDMA hardware resources are available.")
+	}
+	log.Println(pfs_available)
+
+	pod_interface_placements, placement_successful := knapsack_pod_placement.PlacePod(pod_required_interfaces, pfs_available)
+	if(!placement_successful) {
+		log.Fatal("Unable to fit pod into available RDMA resources on node.")
+	}
+	log.Println(pod_interface_placements)
 
 	n, err := loadConf(args.StdinData)
 	if err != nil {
@@ -958,8 +985,8 @@ func setUpLink(ifName string) error {
 func allocateVfsToPod(pfs []rdma_hardware_info.PF, pod_interfaces_required []knapsack_pod_placement.RdmaInterfaceRequest, interface_placements []int) {
 }
 
-/*
-func getPodRequirements() {
+
+func getPodRequirements(pod_name string, pod_namespace string) []knapsack_pod_placement.RdmaInterfaceRequest {
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
 	if(err != nil) {
 		log.Fatal("RDMA CNI: Error building Kubernetes configuration from file /etc/kubernetes/kubelet.conf")
@@ -972,19 +999,33 @@ func getPodRequirements() {
 //		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
-	pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
+	pod, err := clientset.CoreV1().Pods(pod_namespace).Get(pod_name, metav1.GetOptions{})
 	if(err != nil) {
 		log.Fatal("RDMA CNI: Error retrieving pod information from Kubernetes API server.")
 //		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
-	
+
+	//if no annotation about required RDMA interfaces was present
+	if(pod.ObjectMeta.Annotations["rdma_interfaces_required"] == "") {
+		//the pod does not need any RDMA interfaces
+		return []knapsack_pod_placement.RdmaInterfaceRequest{}
+	}
+
+	var interfaces_needed []knapsack_pod_placement.RdmaInterfaceRequest
+	err = json.Unmarshal([]byte(pod.ObjectMeta.Annotations["rdma_interfaces_required"]), &interfaces_needed)
+	if(err != nil) {
+		log.Fatal("RDMA CNI: Error unmarshalling JSON for RDMA interface requirements.")
+	}
+
+	return interfaces_needed
 }
-*/
+
 
 func main() {
 	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	logFile.Write([]byte("ENTERING main\n"))
 
+/*
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
 	if(err != nil) {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
@@ -1005,6 +1046,7 @@ func main() {
 		logFile.Write([]byte("\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
+*/
 
 	skel.PluginMain(cmdAdd, cmdDel)
 	logFile.Write([]byte("LEAVING main\n"))
