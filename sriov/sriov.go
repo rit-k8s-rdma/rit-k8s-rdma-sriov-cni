@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-//	"log"
+	//	"log"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -16,14 +16,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
 	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
+	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
 
-	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/swrap/sriovnet"
 	"github.com/vishvananda/netlink"
 
 	//	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -418,7 +418,7 @@ func configSriov(master string) error {
 	return nil
 }
 
-func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS) error {
+func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS, pod_interfaces_required knapsack_pod_placement.RdmaInterfaceRequest) error {
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING setupVF\n"))
 	}
@@ -469,6 +469,12 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			pciAddr, err = getpciaddress(ifName, vfIdx)
 			if err != nil {
 				return fmt.Errorf("err in getting pci address - %q", err)
+			}
+
+			//setup the vf min and max bandwidth
+			err := sriovnet.SetMinMaxRate(ifName, uint(vf), pod_interfaces_required.MinTxRate, pod_interfaces_required.MaxTxRate)
+			if err != nil {
+				return fmt.Errorf("error setting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
 			}
 			break
 		} else {
@@ -648,14 +654,6 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 		index := vfDev.Attrs().Index
 		devName := fmt.Sprintf("dev%d", index)
 
-		// if logFile != nil {
-		// 	logFile.Write([]byte("NETLINK: change back transaction rate\n"))
-		// }
-
-		// if err = netlink.LinkSetVfTxRate(vfDev, index, 0); err != nil {
-		// 	return fmt.Errorf("failed to setup vf %d device: %v", index, err)
-		// }
-
 		// shutdown VF device
 		if err = netlink.LinkSetDown(vfDev); err != nil {
 			return fmt.Errorf("failed to down vf device %q: %v", ifName, err)
@@ -680,6 +678,17 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 			if err != nil {
 				return fmt.Errorf("failed to reset vlan: %v", err)
 			}
+		}
+
+		// //reset vf min max rate to 0
+		// err = initns.Do(func(_ ns.NetNS) error {
+		// 	err := sriovnet.SetMinMaxRate(ifName, uint(vf), 0, 0)
+		// 	if err != nil {
+		// 		return fmt.Errorf("error resetting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
+		// 	}
+		// })
+		if err != nil {
+			return fmt.Errorf("failed to reset min/maxrate: %v", err)
 		}
 
 		//break the loop, if the namespace has no shared vf net interface
@@ -803,18 +812,20 @@ func cmdAdd(args *skel.CmdArgs) error {
 		logFile.Write([]byte("ENTERING cmdAdd\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
-//	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
-//	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
-//	if(logFile != nil) {logFile.Write([]byte("\nNetork Namespace: "))}
-//	if(logFile != nil) {logFile.Write([]byte(args.Netns))}
-	if(logFile != nil) {logFile.Write([]byte("\n"))}
+	//	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
+	//	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
+	//	if(logFile != nil) {logFile.Write([]byte("\nNetork Namespace: "))}
+	//	if(logFile != nil) {logFile.Write([]byte(args.Netns))}
+	if logFile != nil {
+		logFile.Write([]byte("\n"))
+	}
 
 	n, err := loadConf(args.StdinData)
 	if err != nil {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
+	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	container_id_log.Write([]byte("aaaaa\n"))
 	container_id_log.Close()
 
@@ -838,30 +849,28 @@ func cmdAdd(args *skel.CmdArgs) error {
 		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
-	pfs, err := getPFs(n.IF0, n.PfNetdevices)
-	if err != nil {
-		return err
-	}
+	var pfs []rdma_hardware_info.PF
+	var pod_interfaces_required []knapsack_pod_placement.RdmaInterfaceRequest
+	var interface_placements []int
+	for iPodPlacement, podPlacement := range interface_placements {
+		pf := pfs[podPlacement]
 
-	for _, pf := range pfs {
-		err = setupVF(n, pf, args.IfName, args.ContainerID, netns)
-		if err == nil {
-			break
-		}
-	}
-	defer func() {
-		if err != nil {
-			err = netns.Do(func(_ ns.NetNS) error {
-				_, err := netlink.LinkByName(args.IfName)
-				return err
-			})
-			if err == nil {
-				releaseVF(n, args.IfName, args.ContainerID, netns)
+		err = setupVF(n, pf.Name, args.IfName, args.ContainerID, netns, pod_interfaces_required[iPodPlacement])
+		//defer func is called when errors are encountered, will rollback any changes made
+		defer func() {
+			if err != nil {
+				err = netns.Do(func(_ ns.NetNS) error {
+					_, err := netlink.LinkByName(args.IfName)
+					return err
+				})
+				if err == nil {
+					releaseVF(n, args.IfName, args.ContainerID, netns)
+				}
 			}
+		}()
+		if err != nil {
+			return fmt.Errorf("failed to set up pod interface %q from the device %s: %v", args.IfName, pf.Name, err)
 		}
-	}()
-	if err != nil {
-		return fmt.Errorf("failed to set up pod interface %q from the device %v: %v", args.IfName, n.PfNetdevices, err)
 	}
 
 	// skip the IPAM allocation for the DPDK and L2 mode
@@ -955,9 +964,6 @@ func setUpLink(ifName string) error {
 	return netlink.LinkSetUp(link)
 }
 
-func allocateVfsToPod(pfs []rdma_hardware_info.PF, pod_interfaces_required []knapsack_pod_placement.RdmaInterfaceRequest, interface_placements []int) {
-}
-
 /*
 func getPodRequirements() {
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
@@ -977,7 +983,7 @@ func getPodRequirements() {
 		log.Fatal("RDMA CNI: Error retrieving pod information from Kubernetes API server.")
 //		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
-	
+
 }
 */
 
@@ -986,17 +992,17 @@ func main() {
 	logFile.Write([]byte("ENTERING main\n"))
 
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
-	if(err != nil) {
+	if err != nil {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
-	if(err != nil) {
+	if err != nil {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
 	pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
-	if(err != nil) {
+	if err != nil {
 		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
