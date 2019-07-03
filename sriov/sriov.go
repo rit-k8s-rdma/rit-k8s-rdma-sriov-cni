@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/swrap/sriovnet"
 	"github.com/vishvananda/netlink"
+	vishNetns "github.com/vishvananda/netns"
 
 	//	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -471,10 +473,16 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				return fmt.Errorf("err in getting pci address - %q", err)
 			}
 
-			//setup the vf min and max bandwidth
-			err := sriovnet.SetMinMaxRate(ifName, uint(vf), pod_interfaces_required.MinTxRate, pod_interfaces_required.MaxTxRate)
-			if err != nil {
+			if logFile != nil {
+				logFile.Write([]byte("INFO: SETTING UP MINMAX RATE\n"))
+			}
+
+			if err = netlink.LinkSetMinMaxVfTxRate(m, vfIdx, uint32(pod_interfaces_required.MinTxRate), uint32(pod_interfaces_required.MaxTxRate)); err != nil {
 				return fmt.Errorf("error setting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
+			}
+			if logFile != nil {
+				str := fmt.Sprintf("INFO: Finished setting up min max rate: PF[%s] VF[%d] Rates[%v]\n", ifName, vf, pod_interfaces_required)
+				logFile.Write([]byte(str))
 			}
 			break
 		} else {
@@ -501,14 +509,6 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				return fmt.Errorf("failed to set shared vf %d vlan: %v", vfIdx, err)
 			}
 		}
-	}
-
-	if logFile != nil {
-		logFile.Write([]byte("NETLINK: setting up transaction rate\n"))
-	}
-
-	if err = netlink.LinkSetVfTxRate(m, vfIdx, 75757); err != nil {
-		return fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
 	}
 
 	conf.DPDKConf.PCIaddr = pciAddr
@@ -583,6 +583,7 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING releaseVF\n"))
 	}
+	log.Println("RIT-CNI: RELEASEVF")
 
 	nf := &NetConf{}
 	// get the net conf in cniDir
@@ -659,6 +660,7 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 			return fmt.Errorf("failed to down vf device %q: %v", ifName, err)
 		}
 
+		log.Printf("RIT-CNI: rename link: %s to %s\n", ifName, devName)
 		// rename VF device
 		err = renameLink(ifName, devName)
 		if err != nil {
@@ -680,15 +682,162 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 			}
 		}
 
-		// //reset vf min max rate to 0
-		// err = initns.Do(func(_ ns.NetNS) error {
-		// 	err := sriovnet.SetMinMaxRate(ifName, uint(vf), 0, 0)
-		// 	if err != nil {
-		// 		return fmt.Errorf("error resetting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
-		// 	}
-		// })
+		//break the loop, if the namespace has no shared vf net interface
+		if conf.Sharedvf != true {
+			break
+		}
+	}
+
+	return nil
+}
+
+func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podNetNs string, pfs []rdma_hardware_info.PF) error {
+	log.Println("RIT-CNI: RELEASEVF")
+	// secure the thread for namespace operations
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	netns, err := ns.GetNS(podNetNs)
+	if err != nil {
+		return fmt.Errorf("failed to open pod netnamespace %q: %v", netns, err)
+	}
+	defer netns.Close()
+
+	log.Println("RIT-CNI: starting up th netConf")
+	nf := &NetConf{}
+	// get the net conf in cniDir
+	if err := nf.getNetConf(cid, podInterface.Name, conf.CNIDir, conf); err != nil {
+		return err
+	}
+
+	// check for the DPDK mode and release the allocated DPDK resources
+	if nf.DPDKMode != false {
+		// bind the sriov vf to the kernel driver
+		if err := enabledpdkmode(&nf.DPDKConf, nf.DPDKConf.Ifname, false); err != nil {
+			return fmt.Errorf("DPDK: failed to bind %s to kernel space: %s", nf.DPDKConf.Ifname, err)
+		}
+
+		// reset vlan for DPDK code here
+		pfLink, err := netlink.LinkByName(conf.IF0)
 		if err != nil {
-			return fmt.Errorf("failed to reset min/maxrate: %v", err)
+			return fmt.Errorf("DPDK: master device %s not found: %v", conf.IF0, err)
+		}
+
+		if err = netlink.LinkSetVfVlan(pfLink, nf.DPDKConf.VFID, 0); err != nil {
+			return fmt.Errorf("DPDK: failed to reset vlan tag for vf %d: %v", nf.DPDKConf.VFID, err)
+		}
+
+		return nil
+	}
+
+	log.Println("RIT-CNI: current ns")
+	initns, err := ns.GetCurrentNS()
+	if err != nil {
+		return fmt.Errorf("failed to get init the current netns: %v", err)
+	}
+	defer initns.Close()
+
+	log.Println("RIT-CNI: net ns set it up ")
+	if err = netns.Set(); err != nil {
+		return fmt.Errorf("failed to enter pod netns %q: %v", netns, err)
+	}
+	defer netns.Close()
+	defer func() {
+		log.Println("RIT-CNI: closing initns")
+		if err = initns.Set(); err != nil {
+			log.Printf("Error cleaning up: failed to setting back namespace %q: %v\n", initns, err)
+		} else {
+			log.Println("RIT-CNI: success!")
+		}
+	}()
+
+	if conf.L2Mode != false {
+		//check for the shared vf net interface
+		ifName := podInterface.Name + "d1"
+		_, err := netlink.LinkByName(ifName)
+		if err == nil {
+			conf.Sharedvf = true
+		}
+
+	}
+
+	if err != nil {
+		fmt.Errorf("Enable to get shared PF device: %v", err)
+	}
+
+	for i := 1; i <= maxSharedVf; i++ {
+
+		log.Println("RIT-CNI: yasdfasdf ", podInterface.Name)
+		ifName := podInterface.Name
+		pfName := nf.IF0
+		if i == maxSharedVf {
+			ifName = podInterface.Name + fmt.Sprintf("d%d", i-1)
+			pfName, err = getSharedPF(nf.IF0)
+			if err != nil {
+				return fmt.Errorf("Failed to look up shared PF device: %v:", err)
+			}
+		}
+
+		// get VF device
+		vfDev, err := netlink.LinkByName(ifName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup vf device %q: %v", ifName, err)
+		}
+
+		// device name in init netns
+		index := vfDev.Attrs().Index
+		devName := fmt.Sprintf("dev%d", index)
+
+		// shutdown VF device
+		if err = netlink.LinkSetDown(vfDev); err != nil {
+			return fmt.Errorf("failed to down vf device %q: %v", ifName, err)
+		}
+
+		log.Printf("RIT-CNI: rename link: %s to %s\n", ifName, devName)
+		// rename VF device
+		err = renameLink(ifName, devName)
+		if err != nil {
+			return fmt.Errorf("failed to rename vf device %q to %q: %v", ifName, devName, err)
+		}
+
+		// move VF device to init netns
+		if err = netlink.LinkSetNsFd(vfDev, int(initns.Fd())); err != nil {
+			return fmt.Errorf("failed to move vf device %q to init netns: %v", ifName, err)
+		}
+
+		log.Println("RIT-CNI: vlan")
+		// reset vlan
+		if conf.Vlan != 0 {
+			err = initns.Do(func(_ ns.NetNS) error {
+				return resetVfVlan(pfName, devName)
+			})
+			if err != nil {
+				return fmt.Errorf("failed to reset vlan: %v", err)
+			}
+		}
+
+		var foundVf *rdma_hardware_info.VF
+		for _, pf := range pfs {
+			foundVf = pf.FindAssociatedMac(podInterface.HardwareAddr.String())
+			if foundVf != nil {
+				break
+			}
+		}
+		if foundVf == nil {
+			log.Printf("Error mac address never found: %s\n", podInterface.HardwareAddr.String())
+		} else {
+			err = initns.Do(func(_ ns.NetNS) error {
+				log.Println("RIT-CNI: doing initns stuff ", foundVf.VFNumber, vfDev, foundVf)
+				if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
+					log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+					return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+				}
+				return nil
+			})
+			if err != nil {
+				log.Println("RIT-CNI: ERROR setting the stuff")
+				return fmt.Errorf("failed to reset min/max speed: %v", err)
+			}
 		}
 
 		//break the loop, if the namespace has no shared vf net interface
@@ -696,6 +845,8 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 			break
 		}
 	}
+
+	log.Println("RIT-CNI: done")
 
 	return nil
 }
@@ -833,19 +984,16 @@ func cmdAdd(args *skel.CmdArgs) error {
 		logFile.Write([]byte("\n"))
 	}
 
-	pod_required_interfaces := getPodRequirements(pod_name, pod_ns)
-	log.Println(pod_required_interfaces)
+	pod_interfaces_required := getPodRequirements(pod_name, pod_ns)
 	pfs_available, err := rdma_hardware_info.QueryNode("127.0.0.1", rdma_hardware_info.DefaultPort, 1500)
 	if err != nil {
 		log.Fatal("Could not determine what RDMA hardware resources are available.")
 	}
-	log.Println(pfs_available)
 
-	pod_interface_placements, placement_successful := knapsack_pod_placement.PlacePod(pod_required_interfaces, pfs_available)
+	pod_interface_placements, placement_successful := knapsack_pod_placement.PlacePod(pod_interfaces_required, pfs_available)
 	if !placement_successful {
 		log.Fatal("Unable to fit pod into available RDMA resources on node.")
 	}
-	log.Println(pod_interface_placements)
 
 	n, err := loadConf(args.StdinData)
 	if err != nil {
@@ -876,27 +1024,25 @@ func cmdAdd(args *skel.CmdArgs) error {
 		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
-	var pfs []rdma_hardware_info.PF
-	var pod_interfaces_required []knapsack_pod_placement.RdmaInterfaceRequest
-	var interface_placements []int
-	for iPodPlacement, podPlacement := range interface_placements {
-		pf := pfs[podPlacement]
+	for iPodPlacement, podPlacement := range pod_interface_placements {
+		pf := pfs_available[podPlacement]
 
-		err = setupVF(n, pf.Name, args.IfName, args.ContainerID, netns, pod_interfaces_required[iPodPlacement])
+		ifName := fmt.Sprintf("eth%d", iPodPlacement)
+		err = setupVF(n, pf.Name, ifName, args.ContainerID, netns, pod_interfaces_required[iPodPlacement])
 		//defer func is called when errors are encountered, will rollback any changes made
-		defer func() {
+		defer func(internalIfName string) {
 			if err != nil {
 				err = netns.Do(func(_ ns.NetNS) error {
-					_, err := netlink.LinkByName(args.IfName)
+					_, err := netlink.LinkByName(internalIfName)
 					return err
 				})
 				if err == nil {
-					releaseVF(n, args.IfName, args.ContainerID, netns)
+					releaseVF(n, internalIfName, args.ContainerID, netns)
 				}
 			}
-		}()
+		}(ifName)
 		if err != nil {
-			return fmt.Errorf("failed to set up pod interface %q from the device %s: %v", args.IfName, pf.Name, err)
+			return fmt.Errorf("failed to set up pod interface %q from the device %s: %v", ifName, pf.Name, err)
 		}
 	}
 
@@ -930,6 +1076,43 @@ func cmdAdd(args *skel.CmdArgs) error {
 	return result.Print()
 }
 
+func getNamespaceInterfaces(netnsName string) ([]net.Interface, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// get the current namespace
+	origns, err := vishNetns.Get()
+	if err != nil {
+		return nil, fmt.Errorf("error getting origin namespace: %s", err)
+	}
+	defer origns.Close()
+
+	// get the names from the path
+	newns, err := vishNetns.GetFromPath(netnsName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting netns namespace: %s", err)
+	}
+	defer newns.Close()
+
+	err = vishNetns.Set(newns)
+	if err != nil {
+		return nil, fmt.Errorf("error setting to ns namespace: %s", err)
+	}
+
+	// get all interfaces
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("error getting network interfaces: %s", err)
+	}
+
+	// set back to original interfaces
+	err = vishNetns.Set(origns)
+	if err != nil {
+		return nil, fmt.Errorf("error setting back to origin namespace: %s", err)
+	}
+	return ifaces, nil
+}
+
 func cmdDel(args *skel.CmdArgs) error {
 	//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
 	//	defer logFile.Close()
@@ -940,6 +1123,8 @@ func cmdDel(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+
+	log.Println("RIT-CNI: cmdDel")
 
 	// skip the IPAM release for the DPDK and L2 mode
 	if n.IPAM.Type != "" {
@@ -953,22 +1138,105 @@ func cmdDel(args *skel.CmdArgs) error {
 		return nil
 	}
 
-	netns, err := ns.GetNS(args.Netns)
+	// netns, err := ns.GetNS(args.Netns)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to open netns %q: %v", netns, err)
+	// }
+	// defer netns.Close()
+
+	// old_ifname := os.Getenv("CNI_IFNAME")
+	// defer os.Setenv("CNI_IFNAME", old_ifname)
+	// if n.IF0NAME != "" {
+	// 	args.IfName = n.IF0NAME
+	// 	os.Setenv("CNI_IFNAME", args.IfName)
+	// }
+
+	log.Println("RIT-CNI: PREPARING NAMESPACE 6")
+	log.Println("RIT-CNI: netns:", args.Netns)
+	log.Printf("RIT-CNI: ARGS: %+v\n", args)
+	interfaces, err := getNamespaceInterfaces(args.Netns)
 	if err != nil {
-		return fmt.Errorf("failed to open netns %q: %v", netns, err)
-	}
-	defer netns.Close()
-
-	old_ifname := os.Getenv("CNI_IFNAME")
-	defer os.Setenv("CNI_IFNAME", old_ifname)
-	if n.IF0NAME != "" {
-		args.IfName = n.IF0NAME
-		os.Setenv("CNI_IFNAME", args.IfName)
+		return fmt.Errorf("Error getting iterfaces: %s", err)
 	}
 
-	if err = releaseVF(n, args.IfName, args.ContainerID, netns); err != nil {
-		return err
+	pfs_available, err := rdma_hardware_info.QueryNode("127.0.0.1", rdma_hardware_info.DefaultPort, 1500)
+	if err != nil {
+		log.Println("Error: could not determine what RDMA hardware resources are available")
 	}
+
+	for _, netIntf := range interfaces {
+		log.Printf("RIT-CNI: Going through ifname: %s\n", netIntf.Name)
+		if strings.HasPrefix(netIntf.Name, "eth") {
+			_, err := strconv.Atoi(netIntf.Name[3:])
+			if err != nil {
+				continue
+			}
+			if err = releaseVFCustom(n, netIntf, args.ContainerID, args.Netns, pfs_available); err != nil {
+				log.Printf("Error releasing vf %+v: %s", netIntf, err)
+				continue
+			}
+		}
+	}
+	log.Println("RIT-CNI: CMDDONE")
+
+	// //get host namespace
+	// initns, err := ns.GetCurrentNS()
+	// if err != nil {
+	// 	return fmt.Errorf("cmdDel, failed to get init netns: %v", err)
+	// }
+
+	// //change pods namespace
+	// if err = netns.Set(); err != nil {
+	// 	return fmt.Errorf("cmdDel, failed to enter netns %q: %v", netns, err)
+	// }
+
+	// netdevDir := fmt.Sprintf("/sys/class/net/")
+	// _, err = os.Stat(netdevDir)
+	// if !os.IsNotExist(err) {
+	// 	log.Println("RIT-CNI: found file directory")
+	// 	// if it does exist
+	// 	dirs, err := ioutil.ReadDir(netdevDir)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to read devices dir")
+	// 	}
+
+	// 	for _, file := range dirs {
+	// 		log.Printf("RIT-CNI: found ethernet: %s\n", file.Name())
+	// 		if strings.HasPrefix(file.Name(), "eth") {
+	// 			_, err := strconv.Atoi(file.Name()[3:])
+	// 			if err != nil {
+	// 				continue
+	// 			}
+	// 			netDevNames = append(netDevNames, file.Name())
+	// 		}
+	// 	}
+	// 	log.Println("RIT-CNI: finished checking dirs")
+	// }
+	// log.Println("RIT-CNI: finished checking directory")
+	// log.Println("RIT-CNI: ", netDevNames)
+	// return nil
+	// // })
+
+	// log.Println("RIT-CNI: finished checking directory")
+	// log.Println("RIT-CNI: ", netDevNames)
+
+	// // //change pods namespace back to host namespace
+	// // if err = initns.Set(); err != nil {
+	// // 	return fmt.Errorf("cmdDel, failed to enter host namespace again %q: %v", initns, err)
+	// // }
+
+	// for _, ifName := range netDevNames {
+	// 	log.Printf("RIT-CNI: Going through ifname: %s\n", ifName)
+	// 	// if err = releaseVF(n, ifName, args.ContainerID, netns); err != nil {
+	// 	// 	return err
+	// 	// }
+
+	// 	// //change pods namespace back to host namespace
+	// 	// if err = initns.Set(); err != nil {
+	// 	// 	return fmt.Errorf("cmdDel, failed to enter host namespace again in loop for interface[%s] %q: %v", ifName, initns, err)
+	// 	// }
+	// }
+	// log.Println("RIT-CNI: CMDDONE")
 
 	return nil
 }
