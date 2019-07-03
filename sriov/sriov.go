@@ -828,10 +828,10 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 		} else {
 			err = initns.Do(func(_ ns.NetNS) error {
 				log.Println("RIT-CNI: doing initns stuff ", foundVf.VFNumber, vfDev, foundVf)
-				if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
-					log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
-					return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
-				}
+				// if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
+				// 	log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+				// 	return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+				// }
 				return nil
 			})
 			if err != nil {
