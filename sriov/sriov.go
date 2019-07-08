@@ -477,9 +477,9 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				logFile.Write([]byte("INFO: SETTING UP MINMAX RATE\n"))
 			}
 
-			if err = netlink.LinkSetMinMaxVfTxRate(m, vfIdx, uint32(pod_interfaces_required.MinTxRate), uint32(pod_interfaces_required.MaxTxRate)); err != nil {
-				return fmt.Errorf("error setting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
-			}
+			// if err = netlink.LinkSetMinMaxVfTxRate(m, vfIdx, uint32(pod_interfaces_required.MinTxRate), uint32(pod_interfaces_required.MaxTxRate)); err != nil {
+			// 	return fmt.Errorf("error setting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
+			// }
 			if logFile != nil {
 				str := fmt.Sprintf("INFO: Finished setting up min max rate: PF[%s] VF[%d] Rates[%v]\n", ifName, vf, pod_interfaces_required)
 				logFile.Write([]byte(str))
