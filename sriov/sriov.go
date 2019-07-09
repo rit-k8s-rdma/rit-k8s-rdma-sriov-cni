@@ -990,7 +990,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		log.Fatal("Could not determine what RDMA hardware resources are available.")
 	}
 
-	pod_interface_placements, placement_successful := knapsack_pod_placement.PlacePod(pod_interfaces_required, pfs_available)
+	pod_interface_placements, placement_successful := knapsack_pod_placement.PlacePod(pod_interfaces_required, pfs_available, false)
 	if !placement_successful {
 		log.Fatal("Unable to fit pod into available RDMA resources on node.")
 	}
