@@ -17,8 +17,12 @@ import (
 	"strconv"
 	"strings"
 
+	types040 "github.com/cal8384/sriov-cni/sriov/cni/types"
+	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
+
 	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
 	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
+	"github.com/cal8384/sriov-cni/sriov/cni/types/current"
 
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
@@ -434,6 +438,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING setupVF\n"))
 	}
+	log.Println("RIT-CNI: ENTERING setupVF")
 
 	var vfIdx int
 	var infos []os.FileInfo
@@ -548,20 +553,25 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 
 	var vfName string
 	for i := 1; i <= len(infos); i++ {
+		log.Println("RIT-CNI: chose link name: ", infos[i-1].Name())
 		vfDev, err := netlink.LinkByName(infos[i-1].Name())
 		if err != nil {
 			return &vfIdx, fmt.Errorf("failed to lookup vf device %q: %v", infos[i-1].Name(), err)
 		}
 		// change name if it is eth0
 		if infos[i-1].Name() == "eth0" {
+			log.Println("RIT-CNI: link name = 'etho0' for some reason... renaming link: ", infos[i-1].Name())
 			netlink.LinkSetDown(vfDev)
 			vfName = fmt.Sprintf("sriov%v", rand.Intn(9999))
 			renameLink(infos[i-1].Name(), vfName)
 		} else {
 			vfName = infos[i-1].Name()
 		}
+		log.Println("RIT-CNI: setting up link: ", vfDev)
 		if err = netlink.LinkSetUp(vfDev); err != nil {
 			return &vfIdx, fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
+		} else {
+			log.Println("RIT-CNI: succesfully setup link: ", vfDev)
 		}
 
 		// move VF device to ns
@@ -1005,6 +1015,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		logFile.Write([]byte("ENTERING cmdAdd\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
+	log.Println("RIT-CNI: CMDADD")
 
 	pod_name := ""
 	pod_ns := ""
@@ -1066,6 +1077,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 		os.Setenv("CNI_IFNAME", args.IfName)
 	}
 
+	var finalResult *current.Result
+
 	for iPodPlacement, podPlacement := range pod_interface_placements {
 		pf := pfs_available[podPlacement]
 
@@ -1087,36 +1100,135 @@ func cmdAdd(args *skel.CmdArgs) error {
 		if err != nil {
 			return fmt.Errorf("failed to set up pod interface %q from the device %s: %v", ifName, pf.Name, err)
 		}
-	}
 
-	// skip the IPAM allocation for the DPDK and L2 mode
-	var result *types.Result
-	if n.DPDKMode != false || n.L2Mode != false {
-		return result.Print()
-	}
-
-	// run the IPAM plugin and get back the config to apply
-	result, err = ipam.ExecAdd(n.IPAM.Type, args.StdinData)
-	if err != nil {
-		return fmt.Errorf("failed to set up IPAM plugin type %q from the device %q: %v", n.IPAM.Type, n.IF0, err)
-	}
-	if result.IP4 == nil {
-		return errors.New("IPAM plugin returned missing IPv4 config")
-	}
-	defer func() {
-		if err != nil {
-			ipam.ExecDel(n.IPAM.Type, args.StdinData)
+		// skip the IPAM allocation for the DPDK and L2 mode
+		var result *types.Result
+		if n.DPDKMode != false || n.L2Mode != false {
+			return fmt.Errorf("error setting dpdk mode: %s", result.Print())
 		}
-	}()
-	err = netns.Do(func(_ ns.NetNS) error {
-		return ipam.ConfigureIface(args.IfName, result)
-	})
-	if err != nil {
-		return err
-	}
 
-	result.DNS = n.DNS
-	return result.Print()
+		// run the IPAM plugin and get back the config to apply
+		log.Println("RIT-CNI: starting ipam")
+		result, err = ipam.ExecAdd(n.IPAM.Type, args.StdinData)
+		if err != nil {
+			log.Println("RIT-CNI: error getting ipam: ", err)
+			return fmt.Errorf("failed to set up IPAM plugin type %q from the device %q: %v", n.IPAM.Type, ifName, err)
+		}
+		if result.IP4 == nil {
+			log.Println("RIT-CNI: error getting ip4 from result")
+			return errors.New("IPAM plugin returned missing IPv4 config")
+		}
+		defer func() {
+			if err != nil {
+				log.Println("RIT-CNI: ipam defer called")
+				ipam.ExecDel(n.IPAM.Type, args.StdinData)
+			}
+		}()
+		err = netns.Do(func(_ ns.NetNS) error {
+			log.Printf("RIT-CNI: configuring interface[%s] with ip result: %+v\n", ifName, result)
+			err := ipam.ConfigureIface(ifName, result)
+			log.Println("RIT-CNI: finished ipam with err: ", err)
+			return err
+		})
+		log.Println("RIT-CNI: finished configuring interface")
+		if err != nil {
+			log.Println("RIT-CNI: error configuring interface in device netnamespace: ", err)
+			return err
+		}
+
+		result.DNS = n.DNS
+		log.Printf("RIT-CNI: ipam successfully configured with: %+v\n", result)
+
+		//must convert 0.2.0 spec that this to 0.4.0
+		//need this b/c multiple interfaces are possible
+		var result020 *types020.Result
+		if result.IP4 != nil {
+			var routes []types040.Route
+			for _, route := range result.IP4.Routes {
+				newRoute := types040.Route{
+					Dst: route.Dst,
+					GW:  route.GW,
+				}
+				routes = append(routes, newRoute)
+			}
+			result020 = &types020.Result{
+				CNIVersion: types020.ImplementedSpecVersion,
+				IP4: &types020.IPConfig{
+					IP:      result.IP4.IP,
+					Gateway: result.IP4.Gateway,
+					Routes:  routes,
+				},
+				DNS: types040.DNS{
+					Nameservers: result.DNS.Nameservers,
+					Domain:      result.DNS.Domain,
+					Search:      result.DNS.Search,
+					Options:     result.DNS.Options,
+				},
+			}
+		} else if result.IP6 != nil {
+			//not implemented in ipam, so no need to implement it here
+		}
+
+		if result020 != nil {
+			log.Printf("RIT-CNI: adding result020: %+v\n", result020)
+			newResult, err := current.NewResultFromResult(result020)
+			if err != nil {
+				log.Println("RIT-CNI: Error converting to new result: ", err)
+				continue
+			}
+			if finalResult == nil {
+				log.Println("RIT-CNI: setting finalResult up the first time")
+				finalResult = newResult
+			} else {
+				log.Println("RIT-CNI: setting up ip")
+				if result020.IP4 != nil {
+					log.Println("RIT-CNI: setting up ip4")
+					log.Println("RIT-CNI: stuff", finalResult)
+					finalResult.IPs = append(finalResult.IPs, &current.IPConfig{
+						Version: "4",
+						Address: result020.IP4.IP,
+						Gateway: result020.IP4.Gateway,
+					})
+					log.Println("RIT-CNI: setting ip4 config")
+					for _, route := range result020.IP4.Routes {
+						finalResult.Routes = append(finalResult.Routes, &types040.Route{
+							Dst: route.Dst,
+							GW:  route.GW,
+						})
+					}
+					log.Println("RIT-CNI: finish setting up ip4")
+				}
+
+				if result020.IP6 != nil {
+					log.Println("RIT-CNI: setting up ip6")
+					finalResult.IPs = append(finalResult.IPs, &current.IPConfig{
+						Version: "6",
+						Address: result020.IP6.IP,
+						Gateway: result020.IP6.Gateway,
+					})
+					for _, route := range result020.IP6.Routes {
+						finalResult.Routes = append(finalResult.Routes, &types040.Route{
+							Dst: route.Dst,
+							GW:  route.GW,
+						})
+					}
+				}
+				log.Println("RIT-CNI: finished setting up ip")
+			}
+			finalResult.Interfaces = append(finalResult.Interfaces, &current.Interface{
+				Name: ifName,
+			})
+			log.Printf("RIT-CNI: finalResult current data: %+v\n", finalResult)
+		}
+	}
+	if finalResult == nil {
+		//if no interfaces were needed, than return initialized empty result
+		finalResult = &current.Result{
+			CNIVersion: current.ImplementedSpecVersion,
+		}
+	}
+	log.Printf("RIT-CNI: finalResult struct: %+v\n", finalResult)
+	return finalResult.Print()
 }
 
 func getNamespaceInterfaces(netnsName string) ([]net.Interface, error) {
@@ -1167,7 +1279,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	log.Println("RIT-CNI: cmdDel")
+	log.Println("RIT-CNI: CMDDEL starting")
 
 	// skip the IPAM release for the DPDK and L2 mode
 	if n.IPAM.Type != "" {
@@ -1280,7 +1392,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	// 	// }
 	// }
 	// log.Println("RIT-CNI: CMDDONE")
-
+	log.Println("RIT-CNI: CMDDEL ended")
 	return nil
 }
 
