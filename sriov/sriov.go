@@ -16,21 +16,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	types040 "github.com/cal8384/sriov-cni/sriov/cni/types"
 	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
-
 	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
 	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
 	"github.com/cal8384/sriov-cni/sriov/cni/types/current"
+	"github.com/swrap/sriovnet"
 
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/swrap/sriovnet"
 	"github.com/vishvananda/netlink"
 	vishNetns "github.com/vishvananda/netns"
+	"github.com/fabiokung/shm"
 
 	//	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1010,12 +1011,59 @@ func getContainer(namespace, containerID string) {
 	logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
 }
 
+func acquireShmMutex() (*os.File, error) {
+	log.Println("RIT-CNI: Attempting to acquire shared memory mutex.")
+	for i := 0; i < 60; i++ {
+		sharedMutex, err := shm.Open("rdma_sriov_cni", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if(err != nil) {
+			log.Println("RIT-CNI: Sleeping for 1 second to wait for mutex.")
+			time.Sleep(1 * time.Second)
+			continue
+		} else {
+			log.Println("RIT-CNI: Successfully acquired shared memory mutex.")
+			return sharedMutex, nil
+		}
+	}
+
+	log.Println("RIT-CNI: Reached timeout waiting for shared memory mutex to become available. Assuming existing file was left by crashed program.")
+	//we reached the timeout, assume the file was left by a previous instance that crashed
+	sharedMutex, err := shm.Open("rdma_sriov_cni", os.O_RDWR|os.O_EXCL, 0600)
+	if(err != nil) {
+		return nil, fmt.Errorf("Could not open shared mutex file after timeout: %s", err)
+	}
+
+	log.Println("RIT-CNI: Opened existing shared memory mutex file.")
+	return sharedMutex, nil
+}
+
+func releaseShmMutex(mutexFile *os.File) error {
+	log.Println("RIT-CNI: Attempting to release shared memory mutex.")
+	defer mutexFile.Close()
+	err := shm.Unlink(mutexFile.Name())
+	if(err != nil) {
+		log.Printf("RIT-CNI: Failed to release shared memory mutex: %s", err)
+		return fmt.Errorf("Failed to release shared memory mutex: %s", err)
+	}
+
+	log.Println("RIT-CNI: Successfully released shared memory mutex.")
+	return nil
+}
+
 func cmdAdd(args *skel.CmdArgs) error {
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING cmdAdd\n"))
 	}
 	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
+
 	log.Println("RIT-CNI: CMDADD")
+
+	//acquire shared memory mutex
+	shmMutexFile, err := acquireShmMutex()
+	if(err != nil) {
+		log.Println("RIT-CNI: %s", err)
+		log.Fatal("Unable to acquire shared memory mutex.")
+	}
+	defer releaseShmMutex(shmMutexFile)
 
 	pod_name := ""
 	pod_ns := ""
@@ -1053,9 +1101,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	container_id_log.Write([]byte("aaaaa\n"))
-	container_id_log.Close()
+//	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+//	container_id_log.Write([]byte("aaaaa\n"))
+//	container_id_log.Close()
 
 	if logFile != nil {
 		logFile.Write(args.StdinData)
@@ -1280,6 +1328,14 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	log.Println("RIT-CNI: CMDDEL starting")
+
+	//acquire shared memory mutex
+	shmMutexFile, err := acquireShmMutex()
+	if(err != nil) {
+		log.Println("RIT-CNI: %s", err)
+		log.Fatal("Unable to acquire shared memory mutex.")
+	}
+	defer releaseShmMutex(shmMutexFile)
 
 	// skip the IPAM release for the DPDK and L2 mode
 	if n.IPAM.Type != "" {
