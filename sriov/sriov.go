@@ -104,6 +104,16 @@ func init() {
 	runtime.LockOSThread()
 }
 
+func setVfBandwidthLimits(pfName string, vfNumber string, minTxRate string, maxTxRate string) error {
+        cmnd := exec.Command("/sbin/ip", "link", "set", "dev", pfName, "vf", vfNumber, "max_tx_rate", maxTxRate, "min_tx_rate", minTxRate)
+        err := cmnd.Start()
+        if(err != nil) {
+		return fmt.Errorf("Iproute2 command failed with message: %s", err)
+        }
+
+	return nil
+}
+
 func checkIf0name(ifname string) bool {
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING checkIf0name\n"))
@@ -420,7 +430,7 @@ func configSriov(master string) error {
 	return nil
 }
 
-func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS, pod_interfaces_required knapsack_pod_placement.RdmaInterfaceRequest) error {
+func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS, pod_interfaces_required knapsack_pod_placement.RdmaInterfaceRequest) (*int, error) {
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING setupVF\n"))
 	}
@@ -431,31 +441,31 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 
 	m, err := netlink.LinkByName(ifName)
 	if err != nil {
-		return fmt.Errorf("failed to lookup master %q: %v", ifName, err)
+		return nil, fmt.Errorf("failed to lookup master %q: %v", ifName, err)
 	}
 
 	// get the ifname sriov vf num
 	vfTotal, err := getsriovNumfs(ifName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for vf := 0; vf <= (vfTotal - 1); vf++ {
 		vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn%d/net", ifName, vf)
 		if _, err := os.Lstat(vfDir); err != nil {
 			if vf == (vfTotal - 1) {
-				return fmt.Errorf("failed to open the virtfn%d dir of the device %q: %v", vf, ifName, err)
+				return nil, fmt.Errorf("failed to open the virtfn%d dir of the device %q: %v", vf, ifName, err)
 			}
 			continue
 		}
 
 		infos, err = ioutil.ReadDir(vfDir)
 		if err != nil {
-			return fmt.Errorf("failed to read the virtfn%d dir of the device %q: %v", vf, ifName, err)
+			return nil, fmt.Errorf("failed to read the virtfn%d dir of the device %q: %v", vf, ifName, err)
 		}
 
 		if (len(infos) == 0) && (vf == (vfTotal - 1)) {
-			return fmt.Errorf("no Virtual function exist in directory %s, last vf is virtfn%d", vfDir, vf)
+			return nil, fmt.Errorf("no Virtual function exist in directory %s, last vf is virtfn%d", vfDir, vf)
 		}
 
 		if (len(infos) == 0) && (vf != (vfTotal - 1)) {
@@ -470,11 +480,20 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			vfIdx = vf
 			pciAddr, err = getpciaddress(ifName, vfIdx)
 			if err != nil {
-				return fmt.Errorf("err in getting pci address - %q", err)
+				return nil, fmt.Errorf("err in getting pci address - %q", err)
 			}
 
 			if logFile != nil {
 				logFile.Write([]byte("INFO: SETTING UP MINMAX RATE\n"))
+			}
+
+			err := setVfBandwidthLimits(
+				ifName,
+				fmt.Sprintf("%d", vfIdx),
+				fmt.Sprintf("%d", pod_interfaces_required.MinTxRate),
+				fmt.Sprintf("%d", pod_interfaces_required.MaxTxRate))
+			if(err != nil) {
+				return &vfIdx, fmt.Errorf("Failed setting the min and max tx rates on PF[%s] VF[%d]: %s", ifName, vf, err)
 			}
 
 			// if err = netlink.LinkSetMinMaxVfTxRate(m, vfIdx, uint32(pod_interfaces_required.MinTxRate), uint32(pod_interfaces_required.MaxTxRate)); err != nil {
@@ -486,27 +505,27 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			}
 			break
 		} else {
-			return fmt.Errorf("mutiple network devices in directory %s", vfDir)
+			return nil, fmt.Errorf("mutiple network devices in directory %s", vfDir)
 		}
 	}
 
 	// VF NIC name
 	if len(infos) != 1 && len(infos) != maxSharedVf {
-		return fmt.Errorf("no virutal network resources avaiable for the %q", ifName)
+		return &vfIdx, fmt.Errorf("no virutal network resources avaiable for the %q", ifName)
 	}
 
 	if conf.Sharedvf != false && conf.L2Mode != true {
-		return fmt.Errorf("l2enable mode must be true to use shared net interface %q", ifName)
+		return &vfIdx, fmt.Errorf("l2enable mode must be true to use shared net interface %q", ifName)
 	}
 
 	if conf.Vlan != 0 {
 		if err = netlink.LinkSetVfVlan(m, vfIdx, conf.Vlan); err != nil {
-			return fmt.Errorf("failed to set vf %d vlan: %v", vfIdx, err)
+			return &vfIdx, fmt.Errorf("failed to set vf %d vlan: %v", vfIdx, err)
 		}
 
 		if conf.Sharedvf {
 			if err = setSharedVfVlan(ifName, vfIdx, conf.Vlan); err != nil {
-				return fmt.Errorf("failed to set shared vf %d vlan: %v", vfIdx, err)
+				return &vfIdx, fmt.Errorf("failed to set shared vf %d vlan: %v", vfIdx, err)
 			}
 		}
 	}
@@ -516,9 +535,9 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	conf.DPDKConf.VFID = vfIdx
 	if conf.DPDKMode != false {
 		if err = saveNetConf(cid, conf.CNIDir, conf); err != nil {
-			return err
+			return &vfIdx, err
 		}
-		return enabledpdkmode(&conf.DPDKConf, infos[0].Name(), true)
+		return &vfIdx, enabledpdkmode(&conf.DPDKConf, infos[0].Name(), true)
 	}
 
 	// Sort links name if there are 2 or more PF links found for a VF;
@@ -531,7 +550,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	for i := 1; i <= len(infos); i++ {
 		vfDev, err := netlink.LinkByName(infos[i-1].Name())
 		if err != nil {
-			return fmt.Errorf("failed to lookup vf device %q: %v", infos[i-1].Name(), err)
+			return &vfIdx, fmt.Errorf("failed to lookup vf device %q: %v", infos[i-1].Name(), err)
 		}
 		// change name if it is eth0
 		if infos[i-1].Name() == "eth0" {
@@ -542,16 +561,16 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			vfName = infos[i-1].Name()
 		}
 		if err = netlink.LinkSetUp(vfDev); err != nil {
-			return fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
+			return &vfIdx, fmt.Errorf("failed to setup vf %d device: %v", vfIdx, err)
 		}
 
 		// move VF device to ns
 		if err = netlink.LinkSetNsFd(vfDev, int(netns.Fd())); err != nil {
-			return fmt.Errorf("failed to move vf %d to netns: %v", vfIdx, err)
+			return &vfIdx, fmt.Errorf("failed to move vf %d to netns: %v", vfIdx, err)
 		}
 	}
 
-	return netns.Do(func(_ ns.NetNS) error {
+	return &vfIdx, netns.Do(func(_ ns.NetNS) error {
 
 		ifName := podifName
 		for i := 1; i <= len(infos); i++ {
@@ -579,7 +598,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	})
 }
 
-func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) error {
+func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS, pfName string, vfNumber *int) error {
 	if logFile != nil {
 		logFile.Write([]byte("ENTERING releaseVF\n"))
 	}
@@ -679,6 +698,24 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS) erro
 			})
 			if err != nil {
 				return fmt.Errorf("failed to reset vlan: %v", err)
+			}
+		}
+
+		if vfNumber != nil {
+			err = initns.Do(func(_ ns.NetNS) error {
+				log.Println("RIT-CNI: doing initns stuff: ", *vfNumber)
+				if err = setVfBandwidthLimits(pfName, fmt.Sprintf("%d", *vfNumber), "0", "0"); err != nil {
+					return fmt.Errorf("Failed resetting bandwidth limits: %s", err)
+				}
+				// if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
+				// 	log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+				// 	return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+				// }
+				return nil
+			})
+			if err != nil {
+				log.Println("RIT-CNI: ERROR setting the stuff")
+				return fmt.Errorf("failed to reset min/max speed: %v", err)
 			}
 		}
 
@@ -817,9 +854,11 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 		}
 
 		var foundVf *rdma_hardware_info.VF
+		var foundPfName string
 		for _, pf := range pfs {
 			foundVf = pf.FindAssociatedMac(podInterface.HardwareAddr.String())
 			if foundVf != nil {
+				foundPfName = pf.Name
 				break
 			}
 		}
@@ -828,6 +867,9 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 		} else {
 			err = initns.Do(func(_ ns.NetNS) error {
 				log.Println("RIT-CNI: doing initns stuff ", foundVf.VFNumber, vfDev, foundVf)
+				if err = setVfBandwidthLimits(foundPfName, fmt.Sprintf("%d", foundVf.VFNumber), "0", "0"); err != nil {
+					return fmt.Errorf("Failed resetting bandwidth limits: %s", err)
+				}
 				// if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
 				// 	log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
 				// 	return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
@@ -1028,7 +1070,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 		pf := pfs_available[podPlacement]
 
 		ifName := fmt.Sprintf("eth%d", iPodPlacement)
-		err = setupVF(n, pf.Name, ifName, args.ContainerID, netns, pod_interfaces_required[iPodPlacement])
+		var vfNum *int
+		vfNum, err = setupVF(n, pf.Name, ifName, args.ContainerID, netns, pod_interfaces_required[iPodPlacement])
 		//defer func is called when errors are encountered, will rollback any changes made
 		defer func(internalIfName string) {
 			if err != nil {
@@ -1037,7 +1080,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 					return err
 				})
 				if err == nil {
-					releaseVF(n, internalIfName, args.ContainerID, netns)
+					releaseVF(n, internalIfName, args.ContainerID, netns, pf.Name, vfNum)
 				}
 			}
 		}(ifName)
