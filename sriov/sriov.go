@@ -1013,7 +1013,7 @@ func getContainer(namespace, containerID string) {
 
 func acquireShmMutex() (*os.File, error) {
 	log.Println("RIT-CNI: Attempting to acquire shared memory mutex.")
-	for i := 0; i < 60; i++ {
+	for i := 0; i < (60 * 5); i++ {
 		sharedMutex, err := shm.Open("rdma_sriov_cni", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 		if(err != nil) {
 			log.Println("RIT-CNI: Sleeping for 1 second to wait for mutex.")
