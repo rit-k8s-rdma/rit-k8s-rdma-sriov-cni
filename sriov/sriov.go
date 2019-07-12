@@ -18,20 +18,20 @@ import (
 	"strings"
 	"time"
 
-	types040 "github.com/cal8384/sriov-cni/sriov/cni/types"
-	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
 	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
 	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
+	types040 "github.com/cal8384/sriov-cni/sriov/cni/types"
 	"github.com/cal8384/sriov-cni/sriov/cni/types/current"
+	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
 	"github.com/swrap/sriovnet"
 
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
+	"github.com/fabiokung/shm"
 	"github.com/vishvananda/netlink"
 	vishNetns "github.com/vishvananda/netns"
-	"github.com/fabiokung/shm"
 
 	//	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,15 +55,13 @@ type dpdkConf struct {
 
 type NetConf struct {
 	types.NetConf
-	DPDKMode     bool
-	Sharedvf     bool
-	DPDKConf     dpdkConf `json:"dpdk,omitempty"`
-	CNIDir       string   `json:"cniDir"`
-	IF0          string   `json:"if0"`
-	IF0NAME      string   `json:"if0name"`
-	L2Mode       bool     `json:"l2enable"`
-	Vlan         int      `json:"vlan"`
-	PfNetdevices []string `json:"pfNetdevices"`
+	DPDKMode bool
+	Sharedvf bool
+	DPDKConf dpdkConf `json:"dpdk,omitempty"`
+	CNIDir   string   `json:"cniDir"`
+	IF0NAME  string   `json:"if0name"`
+	L2Mode   bool     `json:"l2enable"`
+	Vlan     int      `json:"vlan"`
 }
 
 type pfInfo struct {
@@ -110,11 +108,11 @@ func init() {
 }
 
 func setVfBandwidthLimits(pfName string, vfNumber string, minTxRate string, maxTxRate string) error {
-        cmnd := exec.Command("/sbin/ip", "link", "set", "dev", pfName, "vf", vfNumber, "max_tx_rate", maxTxRate, "min_tx_rate", minTxRate)
-        err := cmnd.Start()
-        if(err != nil) {
+	cmnd := exec.Command("/sbin/ip", "link", "set", "dev", pfName, "vf", vfNumber, "max_tx_rate", maxTxRate, "min_tx_rate", minTxRate)
+	err := cmnd.Start()
+	if err != nil {
 		return fmt.Errorf("Iproute2 command failed with message: %s", err)
-        }
+	}
 
 	return nil
 }
@@ -147,10 +145,6 @@ func loadConf(bytes []byte) (*NetConf, error) {
 		if err != true {
 			return nil, fmt.Errorf(`"if0name" field should not be  equal to (eth0 | eth1 | lo | ""). It specifies the virtualized interface name in the pod`)
 		}
-	}
-
-	if n.IF0 == "" && len(n.PfNetdevices) == 0 {
-		return nil, fmt.Errorf(`"if0" or "pfNetdevices" field is required. It specifies the host interface name to virtualize`)
 	}
 
 	if n.CNIDir == "" {
@@ -498,7 +492,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				fmt.Sprintf("%d", vfIdx),
 				fmt.Sprintf("%d", pod_interfaces_required.MinTxRate),
 				fmt.Sprintf("%d", pod_interfaces_required.MaxTxRate))
-			if(err != nil) {
+			if err != nil {
 				return &vfIdx, fmt.Errorf("Failed setting the min and max tx rates on PF[%s] VF[%d]: %s", ifName, vf, err)
 			}
 
@@ -629,9 +623,9 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS, pfNa
 		}
 
 		// reset vlan for DPDK code here
-		pfLink, err := netlink.LinkByName(conf.IF0)
+		pfLink, err := netlink.LinkByName(pfName)
 		if err != nil {
-			return fmt.Errorf("DPDK: master device %s not found: %v", conf.IF0, err)
+			return fmt.Errorf("DPDK: master device %s not found: %v", pfName, err)
 		}
 
 		if err = netlink.LinkSetVfVlan(pfLink, nf.DPDKConf.VFID, 0); err != nil {
@@ -666,10 +660,10 @@ func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS, pfNa
 
 	for i := 1; i <= maxSharedVf; i++ {
 		ifName := podifName
-		pfName := nf.IF0
+		pfName := pfName
 		if i == maxSharedVf {
 			ifName = podifName + fmt.Sprintf("d%d", i-1)
-			pfName, err = getSharedPF(nf.IF0)
+			pfName, err = getSharedPF(pfName)
 			if err != nil {
 				return fmt.Errorf("Failed to look up shared PF device: %v:", err)
 			}
@@ -757,6 +751,19 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 	if err := nf.getNetConf(cid, podInterface.Name, conf.CNIDir, conf); err != nil {
 		return err
 	}
+	var foundVf *rdma_hardware_info.VF
+	var foundPfName string
+	for _, pf := range pfs {
+		foundVf = pf.FindAssociatedMac(podInterface.HardwareAddr.String())
+		if foundVf != nil {
+			foundPfName = pf.Name
+			break
+		}
+	}
+	if foundVf == nil {
+		log.Printf("Error mac address never found: %s\n", podInterface.HardwareAddr.String())
+		log.Println("Error never found pfName of device to release")
+	}
 
 	// check for the DPDK mode and release the allocated DPDK resources
 	if nf.DPDKMode != false {
@@ -766,9 +773,9 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 		}
 
 		// reset vlan for DPDK code here
-		pfLink, err := netlink.LinkByName(conf.IF0)
+		pfLink, err := netlink.LinkByName(foundPfName)
 		if err != nil {
-			return fmt.Errorf("DPDK: master device %s not found: %v", conf.IF0, err)
+			return fmt.Errorf("DPDK: master device %s not found: %v", foundPfName, err)
 		}
 
 		if err = netlink.LinkSetVfVlan(pfLink, nf.DPDKConf.VFID, 0); err != nil {
@@ -817,12 +824,12 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 
 		log.Println("RIT-CNI: yasdfasdf ", podInterface.Name)
 		ifName := podInterface.Name
-		pfName := nf.IF0
+		pfName := foundPfName
 		if i == maxSharedVf {
 			ifName = podInterface.Name + fmt.Sprintf("d%d", i-1)
-			pfName, err = getSharedPF(nf.IF0)
+			pfName, err = getSharedPF(foundPfName)
 			if err != nil {
-				return fmt.Errorf("Failed to look up shared PF device: %v:", err)
+				return fmt.Errorf("failed to look up shared PF device: %v:", err)
 			}
 		}
 
@@ -864,33 +871,20 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 			}
 		}
 
-		var foundVf *rdma_hardware_info.VF
-		var foundPfName string
-		for _, pf := range pfs {
-			foundVf = pf.FindAssociatedMac(podInterface.HardwareAddr.String())
-			if foundVf != nil {
-				foundPfName = pf.Name
-				break
+		err = initns.Do(func(_ ns.NetNS) error {
+			log.Println("RIT-CNI: doing initns stuff ", foundVf.VFNumber, vfDev, foundVf)
+			if err = setVfBandwidthLimits(foundPfName, fmt.Sprintf("%d", foundVf.VFNumber), "0", "0"); err != nil {
+				return fmt.Errorf("Failed resetting bandwidth limits: %s", err)
 			}
-		}
-		if foundVf == nil {
-			log.Printf("Error mac address never found: %s\n", podInterface.HardwareAddr.String())
-		} else {
-			err = initns.Do(func(_ ns.NetNS) error {
-				log.Println("RIT-CNI: doing initns stuff ", foundVf.VFNumber, vfDev, foundVf)
-				if err = setVfBandwidthLimits(foundPfName, fmt.Sprintf("%d", foundVf.VFNumber), "0", "0"); err != nil {
-					return fmt.Errorf("Failed resetting bandwidth limits: %s", err)
-				}
-				// if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
-				// 	log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
-				// 	return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
-				// }
-				return nil
-			})
-			if err != nil {
-				log.Println("RIT-CNI: ERROR setting the stuff")
-				return fmt.Errorf("failed to reset min/max speed: %v", err)
-			}
+			// if err = netlink.LinkSetMinMaxVfTxRate(vfDev, int(foundVf.VFNumber), uint32(0), uint32(0)); err != nil {
+			// 	log.Printf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+			// 	return fmt.Errorf("Error setting mac address back to 0: %s\n", podInterface.HardwareAddr.String())
+			// }
+			return nil
+		})
+		if err != nil {
+			log.Println("RIT-CNI: ERROR setting the stuff")
+			return fmt.Errorf("failed to reset min/max speed: %v", err)
 		}
 
 		//break the loop, if the namespace has no shared vf net interface
@@ -1015,7 +1009,7 @@ func acquireShmMutex() (*os.File, error) {
 	log.Println("RIT-CNI: Attempting to acquire shared memory mutex.")
 	for i := 0; i < (60 * 5); i++ {
 		sharedMutex, err := shm.Open("rdma_sriov_cni", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
-		if(err != nil) {
+		if err != nil {
 			log.Println("RIT-CNI: Sleeping for 1 second to wait for mutex.")
 			time.Sleep(1 * time.Second)
 			continue
@@ -1028,7 +1022,7 @@ func acquireShmMutex() (*os.File, error) {
 	log.Println("RIT-CNI: Reached timeout waiting for shared memory mutex to become available. Assuming existing file was left by crashed program.")
 	//we reached the timeout, assume the file was left by a previous instance that crashed
 	sharedMutex, err := shm.Open("rdma_sriov_cni", os.O_RDWR|os.O_EXCL, 0600)
-	if(err != nil) {
+	if err != nil {
 		return nil, fmt.Errorf("Could not open shared mutex file after timeout: %s", err)
 	}
 
@@ -1040,7 +1034,7 @@ func releaseShmMutex(mutexFile *os.File) error {
 	log.Println("RIT-CNI: Attempting to release shared memory mutex.")
 	defer mutexFile.Close()
 	err := shm.Unlink(mutexFile.Name())
-	if(err != nil) {
+	if err != nil {
 		log.Printf("RIT-CNI: Failed to release shared memory mutex: %s", err)
 		return fmt.Errorf("Failed to release shared memory mutex: %s", err)
 	}
@@ -1059,7 +1053,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	//acquire shared memory mutex
 	shmMutexFile, err := acquireShmMutex()
-	if(err != nil) {
+	if err != nil {
 		log.Println("RIT-CNI: %s", err)
 		log.Fatal("Unable to acquire shared memory mutex.")
 	}
@@ -1101,9 +1095,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-//	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-//	container_id_log.Write([]byte("aaaaa\n"))
-//	container_id_log.Close()
+	//	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	//	container_id_log.Write([]byte("aaaaa\n"))
+	//	container_id_log.Close()
 
 	if logFile != nil {
 		logFile.Write(args.StdinData)
@@ -1331,7 +1325,7 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	//acquire shared memory mutex
 	shmMutexFile, err := acquireShmMutex()
-	if(err != nil) {
+	if err != nil {
 		log.Println("RIT-CNI: %s", err)
 		log.Fatal("Unable to acquire shared memory mutex.")
 	}
