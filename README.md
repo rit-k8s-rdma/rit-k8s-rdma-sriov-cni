@@ -42,9 +42,7 @@ options ixgbe max_vfs=8,8
 ### Main parameters
 * `name` (string, required): the name of the network
 * `type` (string, required): "sriov"
-* `if0` (string, optional): name of the PF, if not provided then `pfNetdevices` is required
 * `if0name` (string, optional): interface name in the Container
-* `pfNetdevices` (list, optional) PFs list, if not provided then `if0` is required
 * `l2enable` (boolean, optional): if `true` then add VF as L2 mode only, IPAM will not be executed
 * `vlan` (int, optional): VLAN ID to assign for the VF
 * `ipam` (dictionary, optional): IPAM configuration to be used for this network.
@@ -70,7 +68,6 @@ If given, The DPDK configuration expected to have the following parameters
 {
     "name": "mynet",
     "type": "sriov",
-    "if0": "enp1s0f1",
     "ipam": {
         "type": "host-local",
         "subnet": "10.55.206.0/26",
@@ -110,7 +107,6 @@ lo        Link encap:Local Loopback
 {
     "name": "mynet",
     "type": "sriov",
-    "if0": "enp1s0f1",
     "if0name": "net0",
     "dpdk": {
         "kernel_driver":"ixgbevf",
@@ -128,7 +124,6 @@ EOF
 {
     "name": "mynet",
     "type": "sriov",
-    "pfNetdevices": ["enp2s0f0", "enp2s0f1"],
     "ipam": {
         "type": "host-local",
         "subnet": "10.55.206.0/26",
