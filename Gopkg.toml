@@ -26,13 +26,13 @@
 
 
 [[constraint]]
-  name = "github.com/Mellanox/sriovnet"
-  version = "0.4.0"
-
-[[constraint]]
   name = "github.com/containernetworking/cni"
   version = "0.3.0"
 
 [prune]
   go-tests = true
   unused-packages = true
+
+[[constraint]]
+  name = "github.com/rit-k8s-rdma/rit-k8s-rdma-common"
+  version = "0.2.0"

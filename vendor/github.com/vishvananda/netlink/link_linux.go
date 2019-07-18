@@ -450,33 +450,6 @@ func (h *Handle) LinkSetVfTxRate(link Link, vf, rate int) error {
 	return err
 }
 
-func LinkSetMinMaxVfTxRate(link Link, vf int, min, max uint32) error {
-	return pkgHandle.LinkSetMinMaxVfTxRate(link, vf, min, max)
-}
-
-func (h *Handle) LinkSetMinMaxVfTxRate(link Link, vf int, min, max uint32) error {
-	base := link.Attrs()
-	h.ensureIndex(base)
-	req := h.newNetlinkRequest(unix.RTM_SETLINK, unix.NLM_F_ACK)
-
-	msg := nl.NewIfInfomsg(unix.AF_UNSPEC)
-	msg.Index = int32(base.Index)
-	req.AddData(msg)
-
-	data := nl.NewRtAttr(unix.IFLA_VFINFO_LIST, nil)
-	info := nl.NewRtAttrChild(data, nl.IFLA_VF_INFO, nil)
-	vfmsg := nl.VfRate{
-		Vf:        uint32(vf),
-		MinTxRate: uint32(min),
-		MaxTxRate: uint32(max),
-	}
-	nl.NewRtAttrChild(info, nl.IFLA_VF_RATE, vfmsg.Serialize())
-	req.AddData(data)
-
-	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
-	return err
-}
-
 // LinkSetVfSpoofchk enables/disables spoof check on a vf for the link.
 // Equivalent to: `ip link set $link vf $vf spoofchk $check`
 func LinkSetVfSpoofchk(link Link, vf int, check bool) error {

@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cal8384/k8s-rdma-common/knapsack_pod_placement"
-	"github.com/cal8384/k8s-rdma-common/rdma_hardware_info"
-	types040 "github.com/cal8384/sriov-cni/sriov/cni/types"
-	"github.com/cal8384/sriov-cni/sriov/cni/types/current"
-	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
-	"github.com/swrap/sriovnet"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-common/knapsack_pod_placement"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-common/rdma_hardware_info"
+	types040 "github.com/rit-k8s-rdma/rit-k8s-rdma-sriov-cni/sriov/cni/types"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-sriov-cni/sriov/cni/types/current"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-sriov-cni/sriov/cni/types/types020"
+	sriovnet "github.com/rit-k8s-rdma/rit-k8s-rdma-sriovnet"
 
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"

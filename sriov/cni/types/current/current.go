@@ -23,8 +23,8 @@ import (
 	"net"
 	"os"
 
-	"github.com/cal8384/sriov-cni/sriov/cni/types"
-	"github.com/cal8384/sriov-cni/sriov/cni/types/types020"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-sriov-cni/sriov/cni/types"
+	"github.com/rit-k8s-rdma/rit-k8s-rdma-sriov-cni/sriov/cni/types/types020"
 )
 
 const ImplementedSpecVersion string = "0.4.0"
