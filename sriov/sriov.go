@@ -42,8 +42,6 @@ import (
 const defaultCNIDir = "/var/lib/cni/sriov"
 const maxSharedVf = 2
 
-var logFile *os.File
-
 type dpdkConf struct {
 	PCIaddr    string `json:"pci_addr"`
 	Ifname     string `json:"ifname"`
@@ -100,7 +98,6 @@ func (l LinksByIndex) Less(i, j int) bool {
 }
 
 func init() {
-	//	logFile.Write([]byte("ENTERING init\n"))
 	// this ensures that main runs only on main thread (thread group leader).
 	// since namespace ops (unshare, setns) are done for a single thread, we
 	// must ensure that the goroutine does not jump from OS thread to thread
@@ -118,9 +115,6 @@ func setVfBandwidthLimits(pfName string, vfNumber string, minTxRate string, maxT
 }
 
 func checkIf0name(ifname string) bool {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING checkIf0name\n"))
-	}
 	op := []string{"eth0", "eth1", "lo", ""}
 	for _, if0name := range op {
 		if strings.Compare(if0name, ifname) == 0 {
@@ -132,9 +126,6 @@ func checkIf0name(ifname string) bool {
 }
 
 func loadConf(bytes []byte) (*NetConf, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING loadConf\n"))
-	}
 	n := &NetConf{}
 	if err := json.Unmarshal(bytes, n); err != nil {
 		return nil, fmt.Errorf("failed to load netconf: %v", err)
@@ -159,9 +150,6 @@ func loadConf(bytes []byte) (*NetConf, error) {
 }
 
 func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING saveScratchNetConf\n"))
-	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return fmt.Errorf("failed to create the sriov data directory(%q): %v", dataDir, err)
 	}
@@ -177,9 +165,6 @@ func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
 }
 
 func consumeScratchNetConf(containerID, dataDir string) ([]byte, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING consumeScratchNetConf\n"))
-	}
 	path := filepath.Join(dataDir, containerID)
 	defer os.Remove(path)
 
@@ -192,9 +177,6 @@ func consumeScratchNetConf(containerID, dataDir string) ([]byte, error) {
 }
 
 func saveNetConf(cid, dataDir string, conf *NetConf) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING saveNetConf\n"))
-	}
 	confBytes, err := json.Marshal(conf)
 	if err != nil {
 		return fmt.Errorf("error serializing delegate netconf: %v", err)
@@ -212,9 +194,6 @@ func saveNetConf(cid, dataDir string, conf *NetConf) error {
 }
 
 func (nc *NetConf) getNetConf(cid, podIfName, dataDir string, conf *NetConf) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getNetConf\n"))
-	}
 	s := []string{cid, podIfName}
 	cRef := strings.Join(s, "-")
 
@@ -233,9 +212,6 @@ func (nc *NetConf) getNetConf(cid, podIfName, dataDir string, conf *NetConf) err
 // Devices is ordered by its number of VFs, device that has the
 // most number of vfs will be first in the list.
 func getOrderedPF(devices []string) ([]string, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getOrderedPF\n"))
-	}
 	//check pf devices
 	var pfs pfList
 	for _, pfName := range devices {
@@ -257,9 +233,6 @@ func getOrderedPF(devices []string) ([]string, error) {
 }
 
 func enabledpdkmode(conf *dpdkConf, ifname string, dpdkmode bool) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING enabledpdkmode\n"))
-	}
 	stdout := &bytes.Buffer{}
 	var driver string
 	var device string
@@ -284,9 +257,6 @@ func enabledpdkmode(conf *dpdkConf, ifname string, dpdkmode bool) error {
 }
 
 func getpciaddress(ifName string, vf int) (string, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getpciaddress\n"))
-	}
 	var pciaddr string
 	vfDir := fmt.Sprintf("/sys/class/net/%s/device/virtfn%d", ifName, vf)
 	dirInfo, err := os.Lstat(vfDir)
@@ -308,9 +278,6 @@ func getpciaddress(ifName string, vf int) (string, error) {
 }
 
 func getSharedPF(ifName string) (string, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getSharedPF\n"))
-	}
 	pfName := ""
 	pfDir := fmt.Sprintf("/sys/class/net/%s", ifName)
 	dirInfo, err := os.Lstat(pfDir)
@@ -337,9 +304,6 @@ func getSharedPF(ifName string) (string, error) {
 }
 
 func getsriovNumfs(ifName string) (int, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getsriovNumfs\n"))
-	}
 	var vfTotal int
 
 	sriovFile := fmt.Sprintf("/sys/class/net/%s/device/sriov_numvfs", ifName)
@@ -366,9 +330,6 @@ func getsriovNumfs(ifName string) (int, error) {
 }
 
 func setSharedVfVlan(ifName string, vfIdx int, vlan int) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING setSharedVfVlan\n"))
-	}
 	var err error
 	var sharedifName string
 
@@ -409,9 +370,6 @@ func setSharedVfVlan(ifName string, vfIdx int, vlan int) error {
 }
 
 func configSriov(master string) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING configSriov\n"))
-	}
 	err := sriovnet.EnableSriov(master)
 	if err != nil {
 		return err
@@ -430,9 +388,6 @@ func configSriov(master string) error {
 }
 
 func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns ns.NetNS, pod_interfaces_required knapsack_pod_placement.RdmaInterfaceRequest) (*int, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING setupVF\n"))
-	}
 	log.Println("RIT-CNI: ENTERING setupVF")
 
 	var vfIdx int
@@ -483,10 +438,6 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				return nil, fmt.Errorf("err in getting pci address - %q", err)
 			}
 
-			if logFile != nil {
-				logFile.Write([]byte("INFO: SETTING UP MINMAX RATE\n"))
-			}
-
 			err := setVfBandwidthLimits(
 				ifName,
 				fmt.Sprintf("%d", vfIdx),
@@ -496,13 +447,6 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 				return &vfIdx, fmt.Errorf("Failed setting the min and max tx rates on PF[%s] VF[%d]: %s", ifName, vf, err)
 			}
 
-			// if err = netlink.LinkSetMinMaxVfTxRate(m, vfIdx, uint32(pod_interfaces_required.MinTxRate), uint32(pod_interfaces_required.MaxTxRate)); err != nil {
-			// 	return fmt.Errorf("error setting min/max rate on PF[%s] VF[%d]: %s", ifName, vf, err)
-			// }
-			if logFile != nil {
-				str := fmt.Sprintf("INFO: Finished setting up min max rate: PF[%s] VF[%d] Rates[%v]\n", ifName, vf, pod_interfaces_required)
-				logFile.Write([]byte(str))
-			}
 			break
 		} else {
 			return nil, fmt.Errorf("mutiple network devices in directory %s", vfDir)
@@ -604,9 +548,6 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 }
 
 func releaseVF(conf *NetConf, podifName string, cid string, netns ns.NetNS, pfName string, vfNumber *int) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING releaseVF\n"))
-	}
 	log.Println("RIT-CNI: RELEASEVF")
 
 	nf := &NetConf{}
@@ -899,10 +840,6 @@ func releaseVFCustom(conf *NetConf, podInterface net.Interface, cid string, podN
 }
 
 func resetVfVlan(pfName, vfName string) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING resetVfVlan\n"))
-	}
-
 	// get the ifname sriov vf num
 	vfTotal, err := getsriovNumfs(pfName)
 	if err != nil {
@@ -940,9 +877,6 @@ func resetVfVlan(pfName, vfName string) error {
 }
 
 func validateSriovEnabled(pfName string) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING validateSriovEnabled\n"))
-	}
 	vfTotal, err := getsriovNumfs(pfName)
 	if err != nil {
 		return err
@@ -958,9 +892,6 @@ func validateSriovEnabled(pfName string) error {
 }
 
 func getPFs(if0 string, devs []string) ([]string, error) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getPFs\n"))
-	}
 	pfs := []string{}
 	if if0 != "" {
 		pfs = append(pfs, if0)
@@ -984,25 +915,6 @@ func getPFs(if0 string, devs []string) ([]string, error) {
 		return nil, err
 	}
 	return orderedPF, nil
-}
-
-func getContainer(namespace, containerID string) {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING getContainer\n"))
-	}
-	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
-	if err != nil {
-		logFile.Write([]byte("An error occured when reading config file.\n"))
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		logFile.Write([]byte("An error occured when reading config file.\n"))
-	}
-	pods, err := clientset.CoreV1().Pods(namespace).List(metav1.ListOptions{})
-	if err != nil {
-		logFile.Write([]byte("An error occured when reading config file.\n"))
-	}
-	logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
 }
 
 func acquireShmMutex() (*os.File, error) {
@@ -1044,11 +956,6 @@ func releaseShmMutex(mutexFile *os.File) error {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING cmdAdd\n"))
-	}
-	logFile.Write([]byte(fmt.Sprintf("%+v", args)))
-
 	log.Println("RIT-CNI: CMDADD")
 
 	//acquire shared memory mutex
@@ -1071,13 +978,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 		}
 	}
-	//	if(logFile != nil) {logFile.Write([]byte("CONTAINER ID: "))}
-	//	if(logFile != nil) {logFile.Write([]byte(args.ContainerID))}
-	//	if(logFile != nil) {logFile.Write([]byte("\nNetork Namespace: "))}
-	//	if(logFile != nil) {logFile.Write([]byte(args.Netns))}
-	if logFile != nil {
-		logFile.Write([]byte("\n"))
-	}
 
 	pod_interfaces_required := getPodRequirements(pod_name, pod_ns)
 	pfs_available, err := rdma_hardware_info.QueryNode("127.0.0.1", rdma_hardware_info.DefaultPort, 1500)
@@ -1093,17 +993,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	n, err := loadConf(args.StdinData)
 	if err != nil {
 		return fmt.Errorf("failed to load netconf: %v", err)
-	}
-
-	//	container_id_log, _ := os.OpenFile(fmt.Sprintf("/opt/cni/bin/%s", args.ContainerID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	//	container_id_log.Write([]byte("aaaaa\n"))
-	//	container_id_log.Close()
-
-	if logFile != nil {
-		logFile.Write(args.StdinData)
-	}
-	if logFile != nil {
-		logFile.Write([]byte("\n"))
 	}
 
 	netns, err := ns.GetNS(args.Netns)
@@ -1311,11 +1200,6 @@ func getNamespaceInterfaces(netnsName string) ([]net.Interface, error) {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	//	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND | os.O_CREATE | os.O_WRONLY, 0644)
-	//	defer logFile.Close()
-	if logFile != nil {
-		logFile.Write([]byte("ENTERING cmdDel\n"))
-	}
 	n, err := loadConf(args.StdinData)
 	if err != nil {
 		return err
@@ -1343,19 +1227,6 @@ func cmdDel(args *skel.CmdArgs) error {
 		return nil
 	}
 
-	// netns, err := ns.GetNS(args.Netns)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to open netns %q: %v", netns, err)
-	// }
-	// defer netns.Close()
-
-	// old_ifname := os.Getenv("CNI_IFNAME")
-	// defer os.Setenv("CNI_IFNAME", old_ifname)
-	// if n.IF0NAME != "" {
-	// 	args.IfName = n.IF0NAME
-	// 	os.Setenv("CNI_IFNAME", args.IfName)
-	// }
-
 	log.Println("RIT-CNI: PREPARING NAMESPACE 6")
 	log.Println("RIT-CNI: netns:", args.Netns)
 	log.Printf("RIT-CNI: ARGS: %+v\n", args)
@@ -1382,66 +1253,6 @@ func cmdDel(args *skel.CmdArgs) error {
 			}
 		}
 	}
-	log.Println("RIT-CNI: CMDDONE")
-
-	// //get host namespace
-	// initns, err := ns.GetCurrentNS()
-	// if err != nil {
-	// 	return fmt.Errorf("cmdDel, failed to get init netns: %v", err)
-	// }
-
-	// //change pods namespace
-	// if err = netns.Set(); err != nil {
-	// 	return fmt.Errorf("cmdDel, failed to enter netns %q: %v", netns, err)
-	// }
-
-	// netdevDir := fmt.Sprintf("/sys/class/net/")
-	// _, err = os.Stat(netdevDir)
-	// if !os.IsNotExist(err) {
-	// 	log.Println("RIT-CNI: found file directory")
-	// 	// if it does exist
-	// 	dirs, err := ioutil.ReadDir(netdevDir)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to read devices dir")
-	// 	}
-
-	// 	for _, file := range dirs {
-	// 		log.Printf("RIT-CNI: found ethernet: %s\n", file.Name())
-	// 		if strings.HasPrefix(file.Name(), "eth") {
-	// 			_, err := strconv.Atoi(file.Name()[3:])
-	// 			if err != nil {
-	// 				continue
-	// 			}
-	// 			netDevNames = append(netDevNames, file.Name())
-	// 		}
-	// 	}
-	// 	log.Println("RIT-CNI: finished checking dirs")
-	// }
-	// log.Println("RIT-CNI: finished checking directory")
-	// log.Println("RIT-CNI: ", netDevNames)
-	// return nil
-	// // })
-
-	// log.Println("RIT-CNI: finished checking directory")
-	// log.Println("RIT-CNI: ", netDevNames)
-
-	// // //change pods namespace back to host namespace
-	// // if err = initns.Set(); err != nil {
-	// // 	return fmt.Errorf("cmdDel, failed to enter host namespace again %q: %v", initns, err)
-	// // }
-
-	// for _, ifName := range netDevNames {
-	// 	log.Printf("RIT-CNI: Going through ifname: %s\n", ifName)
-	// 	// if err = releaseVF(n, ifName, args.ContainerID, netns); err != nil {
-	// 	// 	return err
-	// 	// }
-
-	// 	// //change pods namespace back to host namespace
-	// 	// if err = initns.Set(); err != nil {
-	// 	// 	return fmt.Errorf("cmdDel, failed to enter host namespace again in loop for interface[%s] %q: %v", ifName, initns, err)
-	// 	// }
-	// }
-	// log.Println("RIT-CNI: CMDDONE")
 	log.Println("RIT-CNI: CMDDEL ended")
 	return nil
 }
@@ -1468,19 +1279,16 @@ func getPodRequirements(pod_name string, pod_namespace string) []knapsack_pod_pl
 	config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
 	if err != nil {
 		log.Fatal("RDMA CNI: Error building Kubernetes configuration from file /etc/kubernetes/kubelet.conf")
-		//		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Fatal("RDMA CNI: Error building clientset from Kubernetes config file.")
-		//		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
 	pod, err := clientset.CoreV1().Pods(pod_namespace).Get(pod_name, metav1.GetOptions{})
 	if err != nil {
 		log.Fatal("RDMA CNI: Error retrieving pod information from Kubernetes API server.")
-		//		logFile.Write([]byte("An error occured when reading config file.\n"))
 	}
 
 	//if no annotation about required RDMA interfaces was present
@@ -1499,33 +1307,5 @@ func getPodRequirements(pod_name string, pod_namespace string) []knapsack_pod_pl
 }
 
 func main() {
-	logFile, _ = os.OpenFile("/opt/cni/bin/asdf", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	logFile.Write([]byte("ENTERING main\n"))
-
-	/*
-		config, err := clientcmd.BuildConfigFromFlags("", "/etc/kubernetes/kubelet.conf")
-		if err != nil {
-			logFile.Write([]byte("An error occured when reading config file.\n"))
-		}
-
-		clientset, err := kubernetes.NewForConfig(config)
-		if err != nil {
-			logFile.Write([]byte("An error occured when reading config file.\n"))
-		}
-
-		pods, err := clientset.CoreV1().Pods("").List(metav1.ListOptions{})
-		if err != nil {
-			logFile.Write([]byte("An error occured when reading config file.\n"))
-		}
-
-		for n := 0; n < len(pods.Items); n++ {
-			logFile.Write([]byte(fmt.Sprintf("%+v", pods.Items[n].ObjectMeta)))
-			logFile.Write([]byte("\n"))
-		}
-		logFile.Write([]byte(fmt.Sprintf("There are %d pods in the cluster\n", len(pods.Items))))
-	*/
-
 	skel.PluginMain(cmdAdd, cmdDel)
-	logFile.Write([]byte("LEAVING main\n"))
-	logFile.Close()
 }
